@@ -293,38 +293,63 @@ def handle_listen_usb_mic():
         return jsonify({"success": False, "message": "Robot is currently busy navigating."})
 
     audio_file = "robot_speech.wav"
+    
+    # 1. Boost USB Mic capture volume to 100%
     try:
-        subprocess.run(["arecord", "-D", "plughw:3,0", "-d", "3", "-f", "cd", audio_file],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-    except Exception as e:
-        return jsonify({"success": False, "message": f"Mic recording error: {e}"})
-
-    recognized_text = ""
-    try:
-        import speech_recognition as sr
-        r = sr.Recognizer()
-        with sr.AudioFile(audio_file) as source:
-            audio_data = r.record(source)
-            recognized_text = r.recognize_google(audio_data)
+        subprocess.run(["amixer", "-c", "3", "sset", "Mic", "100%", "cap"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["amixer", "-c", "3", "sset", "Capture", "100%", "cap"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
+    # 2. Record in clean 16kHz Mono format (ideal for Speech Recognition)
+    try:
+        cmd = ["arecord", "-D", "plughw:3,0", "-d", "3", "-f", "S16_LE", "-r", "16000", "-c", "1", audio_file]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Mic recording error: {e}"})
+
+    # 3. Speech Recognition
+    recognized_text = ""
+    rec_error = ""
+    try:
+        import speech_recognition as sr
+        r = sr.Recognizer()
+        r.energy_threshold = 300
+        r.dynamic_energy_threshold = True
+
+        with sr.AudioFile(audio_file) as source:
+            audio_data = r.record(source)
+            try:
+                recognized_text = r.recognize_google(audio_data)
+            except sr.UnknownValueError:
+                rec_error = "Could not understand audio. Please speak louder/closer to mic."
+            except sr.RequestError as req_err:
+                rec_error = f"Internet connection needed for speech recognition: {req_err}"
+    except ImportError:
+        rec_error = "SpeechRecognition library not installed. Run: pip3 install SpeechRecognition --break-system-packages"
+    except Exception as e:
+        rec_error = f"Speech error: {e}"
+
     if not recognized_text:
-        return jsonify({"success": False, "message": "Audio recorded. Speak clearly into the USB mic."})
+        print(f"[SPEECH FAIL] {rec_error}")
+        return jsonify({"success": False, "message": rec_error or "No speech detected. Speak louder into the mic."})
 
     print(f"[USB MIC SPEECH] Recognized: '{recognized_text}'")
     transcript = recognized_text.upper()
 
+    # Route extraction
     target = None
-    if "BASE" in transcript or "HOME" in transcript or "STATION" in transcript or " POINT S" in transcript or " TO S" in transcript:
+    if "BASE" in transcript or "HOME" in transcript or "STATION" in transcript or " POINT S" in transcript or " TO S" in transcript or transcript == "S":
         target = "S"
-    elif "POINT A" in transcript or " TO A" in transcript or transcript.endswith(" A"):
+    elif "POINT A" in transcript or " TO A" in transcript or " A" in transcript or transcript == "A":
         target = "A"
-    elif "POINT B" in transcript or " TO B" in transcript or transcript.endswith(" B"):
+    elif "POINT B" in transcript or " TO B" in transcript or " B" in transcript or transcript == "B":
         target = "B"
-    elif "POINT C" in transcript or " TO C" in transcript or transcript.endswith(" C"):
+    elif "POINT C" in transcript or " TO C" in transcript or " C" in transcript or transcript == "C":
         target = "C"
-    elif "POINT D" in transcript or " TO D" in transcript or transcript.endswith(" D"):
+    elif "POINT D" in transcript or " TO D" in transcript or " D" in transcript or transcript == "D":
         target = "D"
     else:
         match = re.search(r'\b([A-D]|S)\b', transcript)
@@ -336,7 +361,7 @@ def handle_listen_usb_mic():
         threading.Thread(target=execute_navigation, args=(target,), daemon=True).start()
         return jsonify({"success": True, "text": recognized_text, "message": f"Heard '{recognized_text}' ➔ Navigating to {target}"})
 
-    return jsonify({"success": False, "text": recognized_text, "message": f"Could not find destination in '{recognized_text}'"})
+    return jsonify({"success": False, "text": recognized_text, "message": f"Heard '{recognized_text}', but could not find destination letter (A, B, C, D, S)."})
 
 if __name__ == '__main__':
     routes_file = os.path.join(os.path.dirname(__file__), 'routes.json')
