@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100 font-sans;
+  }
+}
+
+/* Custom styles for React Flow canvas */
+.react-flow__node {
+  cursor: pointer;
+}
+
+.react-flow__handle {
+  width: 10px;
+  height: 10px;
+  background: #14b8a6;
+  border: 2px solid #0f172a;
+}
+
+.react-flow__edge-path {
+  stroke-width: 2.5;
+}

@@ -1,0 +1,108 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("admin") // admin | viewer
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CampusMap {
+  id        Int      @id @default(autoincrement())
+  name      String
+  version   Int      @default(1)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locations Location[]
+  paths     Path[]
+}
+
+model Location {
+  id          Int      @id @default(autoincrement())
+  mapId       Int
+  name        String
+  type        String   // START | DESTINATION | WAYPOINT
+  x           Float
+  y           Float
+  qrId        String?  @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  map              CampusMap         @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  pathsFrom        Path[]            @relation("PathFrom")
+  pathsTo          Path[]            @relation("PathTo")
+  destinationInfo  DestinationInfo[]
+  robotsHere       Robot[]           @relation("CurrentLocation")
+
+  @@unique([mapId, name])
+}
+
+model Path {
+  id             Int     @id @default(autoincrement())
+  mapId          Int
+  fromLocationId Int
+  toLocationId   Int
+  direction      String  // NORTH | EAST | SOUTH | WEST
+  distance       Float
+  bidirectional  Boolean @default(true)
+
+  map          CampusMap @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  fromLocation Location  @relation("PathFrom", fields: [fromLocationId], references: [id], onDelete: Cascade)
+  toLocation   Location  @relation("PathTo", fields: [toLocationId], references: [id], onDelete: Cascade)
+
+  @@unique([mapId, fromLocationId, toLocationId])
+}
+
+model DestinationInfo {
+  id         Int    @id @default(autoincrement())
+  locationId Int
+  question   String
+  answer     String
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+}
+
+model Robot {
+  id                 Int       @id @default(autoincrement())
+  name               String    @unique
+  token              String    @unique
+  status             String    @default("OFFLINE") // ONLINE | OFFLINE
+  currentLocationId  Int?
+  currentDirection   String?   // NORTH | EAST | SOUTH | WEST
+  currentDestination String?
+  currentState       String    @default("IDLE")
+  battery            Float     @default(100.0)
+  obstacleStatus     String    @default("CLEAR")
+  qrStatus           String    @default("NOT_VERIFIED")
+  lastHeartbeat      DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  currentLocation Location?       @relation("CurrentLocation", fields: [currentLocationId], references: [id])
+  navigationLogs  NavigationLog[]
+}
+
+model NavigationLog {
+  id        Int      @id @default(autoincrement())
+  robotId   Int
+  timestamp DateTime @default(now())
+  state     String
+  location  String?
+  direction String?
+  message   String
+
+  robot Robot @relation(fields: [robotId], references: [id], onDelete: Cascade)
+}
