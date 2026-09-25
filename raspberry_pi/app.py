@@ -19,6 +19,7 @@ app = Flask(__name__)
 
 # State
 current_location = "S"
+current_robot_heading = 0  # 0=North, 90=East, 180=South, 270=West
 robot_status = "System Ready (Idle)"
 current_yaw = 0.0
 is_navigating = False
@@ -71,7 +72,7 @@ def send_cmd(cmd_str):
 
 # Autonomous Navigation Worker
 def execute_navigation(destination):
-    global current_location, robot_status, is_navigating
+    global current_location, current_robot_heading, robot_status, is_navigating
 
     if current_location == destination:
         robot_status = f"Already at Point {destination}"
@@ -85,9 +86,10 @@ def execute_navigation(destination):
         return
 
     robot_status = f"Navigating: {' ➔ '.join(path)}"
-    print(f"[NAV] Path: {' -> '.join(path)} ({dist}m)")
+    print(f"[NAV] Path: {' -> '.join(path)} ({dist}m) | Starting Facing Heading: {current_robot_heading}°")
 
-    steps = nav_engine.generate_turn_by_turn(path, initial_heading=0)
+    # Generate turn-by-turn based on where the robot is ACTUALLY facing
+    steps = nav_engine.generate_turn_by_turn(path, initial_heading=current_robot_heading)
 
     for step in steps:
         if not is_navigating:
@@ -96,12 +98,16 @@ def execute_navigation(destination):
         to_node = step['to_node']
         turn_cmd = step.get('turn_cmd')
         turn_action = step.get('turn_action', 'STRAIGHT')
+        target_heading = step.get('target_heading', current_robot_heading)
 
-        # 1. Turn
+        # 1. Turn to face destination
         if turn_cmd:
             robot_status = f"{turn_action}..."
             send_cmd(turn_cmd)
-            time.sleep(1.8)
+            time.sleep(2.0)
+
+        # Update current heading after turn
+        current_robot_heading = target_heading
 
         # 2. Drive Forward
         robot_status = f"Moving to Node {to_node}..."
@@ -122,7 +128,7 @@ def execute_navigation(destination):
     send_cmd('X')
     robot_status = f"Arrived at Point {destination} (Idle)"
     is_navigating = False
-    print(f"[NAV] Navigation finished at {current_location}")
+    print(f"[NAV] Finished at {current_location}, current heading: {current_robot_heading}°")
 
 # --- API Endpoints ---
 
