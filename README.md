@@ -1,12 +1,14 @@
-# 🤖 CampusConnect: Autonomous IMU Robot Navigation & Teleoperation System
+# 🤖 CampusConnect: Autonomous IMU Robot Navigation & Teleoperation Platform
 
 [![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi%20%7C%20Arduino%20Uno-blue.svg)](https://www.raspberrypi.com/)
-[![Framework](https://img.shields.io/badge/Backend-Flask%20%7C%20Python%203-green.svg)](https://flask.palletsprojects.com/)
-[![Computer Vision](https://img.shields.io/badge/Vision-OpenCV%20QR%20%7C%20rpicam-red.svg)](https://opencv.org/)
+[![Backend](https://img.shields.io/badge/Rover%20Server-Flask%20%7C%20Python%203-green.svg)](https://flask.palletsprojects.com/)
+[![Web Dashboard](https://img.shields.io/badge/Web%20App-React%2018%20%7C%20Vite%20%7C%20Tailwind-61dafb.svg)](https://reactjs.org/)
+[![Enterprise Backend](https://img.shields.io/badge/API%20Server-Express%20%7C%20TypeScript%20%7C%20Prisma-black.svg)](https://expressjs.com/)
+[![Vision](https://img.shields.io/badge/Computer%20Vision-OpenCV%20QR%20%7C%20rpicam-red.svg)](https://opencv.org/)
 [![Pathfinding](https://img.shields.io/badge/Algorithm-Dynamic%20Dijkstra-orange.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)]()
 
-**CampusConnect** is a full-stack, autonomous 4WD rover navigation platform that combines closed-loop **MPU-6050 IMU gyroscope guidance**, **HC-SR04 ultrasonic safety braking**, **dynamic Dijkstra graph pathfinding**, **real-time MJPEG camera streaming**, **destination QR code verification**, **USB microphone voice navigation**, and a **modern mobile-responsive Web UI**.
+**CampusConnect** is a comprehensive, production-grade autonomous 4WD rover ecosystem that unites **closed-loop MPU-6050 IMU gyroscope guidance**, **HC-SR04 ultrasonic safety braking**, **dynamic Dijkstra graph pathfinding**, **real-time MJPEG camera streaming**, **destination QR code verification**, **USB microphone voice navigation**, and a **full-stack React + Express + WebSocket fleet management platform**.
 
 ---
 
@@ -19,10 +21,11 @@
   - **Input:** Physical USB Gooseneck microphone speech recognition (*"Navigate to Point A"*, *"Go to Base Station"*).
   - **Output:** Non-blocking multi-engine text-to-speech (`pico2wave` / `espeak-ng` + `aplay`) routed to the rover's Bluetooth speaker.
 - 📱 **Mobile Touch Teleoperation & SVG Route Map:** Responsive dark-mode dashboard with touch D-pad, live yaw heading, distance telemetry, and an interactive SVG map showing the active node.
+- 🌐 **Full-Stack Enterprise Web Application (`Website/`):** A modern React 18 + TypeScript + Vite frontend and Node.js + Express + Prisma SQLite backend with interactive visual map editor, real-time WebSocket telemetry, location management, path routing, and audit logs.
 
 ---
 
-## 🏗️ Hardware Architecture & Pin Matrix
+## 🏗️ System Architecture & Hardware Pin Matrix
 
 ```
                           ┌──────────────────────────┐
@@ -50,7 +53,7 @@
           └──────────────────┘                  └──────────────────┘
 ```
 
-### ⚡ Wiring & Pinout Connections
+### ⚡ Hardware Pinout Connections
 
 | Component | Pin / Signal | Connected To | Description |
 | :--- | :--- | :--- | :--- |
@@ -92,7 +95,7 @@ The physical layout is modeled as a connected planar graph in `routes.json`:
 ```
 
 - **Nodes:** `S` (Base Station / Start), `A`, `B`, `C`, `D`.
-- **Dynamic Dijkstra Engine:** If an obstacle blocks path $S \to A$, the edge $(S, A)$ is blocked and the pathfinder calculates the alternate detour: $S \to B \to A$.
+- **Dynamic Dijkstra Engine:** If an obstacle blocks path $S \to A$, the edge $(S, A)$ is marked blocked and the pathfinder calculates the alternate detour: $S \to B \to A$.
 
 ---
 
@@ -100,7 +103,7 @@ The physical layout is modeled as a connected planar graph in `routes.json`:
 
 Access printable high-resolution QR codes directly from the web dashboard at `http://<RaspberryPi_IP>:5000/qrcodes`:
 
-| Node | Name | QR Payload | Expected Rover Response |
+| Node | Station Name | QR Payload | Expected Rover Response |
 | :---: | :--- | :---: | :--- |
 | **S** | 🏠 Base Station (Home) | `NODE_S` | 🔊 *"Destination verified successfully!"* |
 | **A** | 📍 Point A | `NODE_A` | 🔊 *"Destination verified successfully!"* |
@@ -130,6 +133,22 @@ c:/NIRMAAAN/
 │   └── templates/
 │       ├── index.html                     # Responsive web dashboard with live camera & D-pad
 │       └── qrcodes.html                   # Printable QR codes page for all 5 nodes
+├── Website/                               # Full-Stack Enterprise Web Application
+│   ├── frontend/                          # React 18 + Vite + Tailwind + Zustand + Socket.io
+│   │   ├── src/components/                # Camera feed, map editor, telemetry widgets
+│   │   ├── src/pages/                     # Dashboard, Destinations, Map Editor, Logs, Settings
+│   │   └── package.json
+│   ├── backend/                           # Express + TypeScript + Prisma + WebSockets
+│   │   ├── prisma/                        # SQLite schema & database seed scripts
+│   │   ├── src/controllers/               # Locations, paths, navigation, robot control APIs
+│   │   └── package.json
+│   └── README.md
+├── docs/                                  # Technical Documentation
+│   ├── api-reference.md                   # REST API & WebSocket specifications
+│   ├── hardware-setup.md                  # Assembly & wiring diagrams
+│   ├── serial-protocol.md                 # Arduino-Pi serial protocol definition
+│   ├── deployment.md                      # Production deployment guidelines
+│   └── troubleshooting.md                 # Hardware & software troubleshooting guide
 └── README.md
 ```
 
@@ -137,43 +156,59 @@ c:/NIRMAAAN/
 
 ## 🚀 Quick Setup & Installation Guide
 
-### 1. Arduino Uno Setup
+### 1. Arduino Uno Firmware
 1. Open `arduino/robot_motor_controller/robot_motor_controller.ino` in the Arduino IDE.
-2. Select Board: **Arduino Uno**, Port: your Arduino USB port.
+2. Select Board: **Arduino Uno**, Port: your Arduino USB COM port.
 3. Click **Upload**.
 
-### 2. Raspberry Pi Setup
-1. Connect to your Raspberry Pi terminal via SSH or VNC.
-2. Clone the repository:
+### 2. Raspberry Pi Onboard Server
+1. Clone the repository on your Raspberry Pi:
    ```bash
    cd ~
-   git clone https://github.com/<your-username>/NIRMAAAN.git campus_connect
+   git clone https://github.com/milanraj-github/CampusConnect.git campus_connect
    cd ~/campus_connect/raspberry_pi
    ```
-3. Install system dependencies:
+2. Install system packages:
    ```bash
    sudo apt update
    sudo apt install -y python3-opencv python3-numpy espeak-ng alsa-utils flac
    ```
-4. Install Python dependencies:
+3. Install Python requirements:
    ```bash
    pip3 install -r requirements.txt
    ```
+4. Run hardware verification test:
+   ```bash
+   python3 test_all_devices.py
+   ```
+5. Launch the rover navigation server:
+   ```bash
+   python3 app.py
+   ```
+   Open `http://<RaspberryPi_IP>:5000` in your smartphone or desktop browser.
 
-### 3. Run Hardware Diagnostics
-Verify all sensors, camera, USB mic, and speaker with the diagnostic tool:
-```bash
-python3 test_all_devices.py
-```
+---
 
-### 4. Launch the Navigation Server
+### 3. Full-Stack Web Platform (`Website/`)
+
+To launch the enterprise React dashboard and Express backend:
+
+#### Backend:
 ```bash
-python3 app.py
+cd Website/backend
+npm install
+npx prisma migrate dev
+npm run dev
 ```
-Open your mobile or desktop browser and navigate to:
+*(Runs backend server on `http://localhost:3001`)*
+
+#### Frontend:
+```bash
+cd Website/frontend
+npm install
+npm run dev
 ```
-http://<RaspberryPi_IP>:5000
-```
+*(Opens web dashboard on `http://localhost:5173`)*
 
 ---
 
@@ -210,6 +245,17 @@ http://<RaspberryPi_IP>:5000
 | `/imu` | `GET` | — | Returns live yaw heading angle (`{"yaw": 45.2}`) |
 | `/listen_usb_mic` | `POST` | — | Records 4s from USB Mic and routes to destination |
 | `/test_speaker` | `POST` | — | Plays test voice announcement through speaker |
+
+---
+
+## 📚 Technical Documentation (`docs/`)
+
+Explore detailed guides in the `docs/` folder:
+- 📖 [`docs/api-reference.md`](file:///c:/NIRMAAAN/docs/api-reference.md): Complete backend REST and WebSocket API specification.
+- 🔌 [`docs/hardware-setup.md`](file:///c:/NIRMAAAN/docs/hardware-setup.md): Schematic diagrams and step-by-step assembly instructions.
+- 💬 [`docs/serial-protocol.md`](file:///c:/NIRMAAAN/docs/serial-protocol.md): Low-level 115200 baud serial packet structure.
+- 🚢 [`docs/deployment.md`](file:///c:/NIRMAAAN/docs/deployment.md): Production setup using systemd service units and reverse proxies.
+- 🛠️ [`docs/troubleshooting.md`](file:///c:/NIRMAAAN/docs/troubleshooting.md): Diagnosis and resolution for I2C lockups, camera streaming, and audio sinks.
 
 ---
 
