@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
-Equipped with Picamera2 / rpicam Native Video Streaming and USB Mic Speech Recognition.
+Features:
+- Live Camera Video Streaming (Picamera2 / rpicam)
+- HC-SR04 Obstacle Detection & Bluetooth Voice Alerts
+- Dijkstra Graph & Moves Autonomous Navigation
+- USB Microphone Speech Recognition
+- Real-Time Manual Touch & Keyboard Teleop Control
 """
 
 import os
@@ -11,7 +16,6 @@ import glob
 import re
 import threading
 import subprocess
-import io
 from flask import Flask, render_template, request, jsonify, Response
 import serial
 
@@ -31,7 +35,7 @@ nav_engine = None
 
 last_voice_alert_time = 0
 
-# --- NATIVE RASPBERRY PI CAMERA STREAMER (Picamera2 / rpicam fallback) ---
+# --- NATIVE RASPBERRY PI CAMERA STREAMER ---
 picam2_obj = None
 
 def init_picamera():
@@ -51,30 +55,27 @@ def generate_video_frames():
     global picam2_obj
     import cv2
     
-    # Try Picamera2 first (Official Bookworm library)
     if picam2_obj:
         while True:
             try:
                 frame = picam2_obj.capture_array()
-                # Frame is RGB, convert to BGR for OpenCV encode
                 frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 ret, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 65])
                 if ret:
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-                time.sleep(0.04) # ~25 FPS
+                time.sleep(0.04)
             except Exception:
                 time.sleep(0.1)
     else:
-        # Fallback to rpicam-vid MJPEG pipe
         cmd = ["rpicam-vid", "-t", "0", "--inline", "--width", "640", "--height", "480", "--codec", "mjpeg", "--framerate", "20", "-o", "-"]
         try:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**6)
             stream_bytes = b''
             while True:
                 stream_bytes += p.stdout.read(1024)
-                a = stream_bytes.find(b'\xff\xd8') # JPEG Start
-                b = stream_bytes.find(b'\xff\xd9') # JPEG End
+                a = stream_bytes.find(b'\xff\xd8')
+                b = stream_bytes.find(b'\xff\xd9')
                 if a != -1 and b != -1:
                     jpg = stream_bytes[a:b+2]
                     stream_bytes = stream_bytes[b+2:]
@@ -244,6 +245,33 @@ def handle_navigate():
     threading.Thread(target=execute_navigation, args=(dest,), daemon=True).start()
     return jsonify({"success": True, "message": f"Routing from {current_location} to {dest}..."})
 
+@app.route('/manual_cmd', methods=['POST'])
+@app.route('/api/manual_control', methods=['POST'])
+def handle_manual_control():
+    global is_navigating, robot_status
+    is_navigating = False  # Manual command overrides navigation
+    data = request.json or {}
+    cmd = data.get('cmd')
+    if cmd:
+        send_cmd(cmd)
+        cmd_labels = {
+            'W': 'Moving Forward',
+            'S': 'Moving Backward',
+            'A': 'Turning Left',
+            'D': 'Turning Right',
+            'X': 'Motors Stopped',
+            '1': 'Turn 90° Left',
+            '2': 'Turn 90° Right',
+            '3': 'Turn 180° Left',
+            '4': 'Turn 180° Right',
+            '5': 'Turn 45° Left',
+            '6': 'Turn 45° Right',
+            'Z': 'Heading Reset to 0°'
+        }
+        robot_status = cmd_labels.get(cmd, f"Command '{cmd}' Executed")
+        return jsonify({"success": True, "cmd": cmd, "status": robot_status})
+    return jsonify({"success": False, "message": "No command received"}), 400
+
 @app.route('/current')
 def handle_current():
     return jsonify({"location": current_location})
@@ -258,14 +286,12 @@ def handle_status():
 def handle_imu():
     return jsonify({"yaw": current_yaw})
 
-# --- ROBOT USB MIC RECORD & SPEECH RECOGNITION (Bypasses Phone Browser Restrictions!) ---
 @app.route('/listen_usb_mic', methods=['POST'])
 def handle_listen_usb_mic():
     global is_navigating
     if is_navigating:
         return jsonify({"success": False, "message": "Robot is currently busy navigating."})
 
-    # Record 3 seconds from USB Microphone Card 3
     audio_file = "robot_speech.wav"
     try:
         subprocess.run(["arecord", "-D", "plughw:3,0", "-d", "3", "-f", "cd", audio_file],
@@ -273,7 +299,6 @@ def handle_listen_usb_mic():
     except Exception as e:
         return jsonify({"success": False, "message": f"Mic recording error: {e}"})
 
-    # Recognize speech using SpeechRecognition library or Google API if internet available
     recognized_text = ""
     try:
         import speech_recognition as sr
@@ -285,13 +310,11 @@ def handle_listen_usb_mic():
         pass
 
     if not recognized_text:
-        # Fallback quick simulation prompt if offline
-        return jsonify({"success": False, "message": "Audio recorded. No internet speech recognition or speak clearer."})
+        return jsonify({"success": False, "message": "Audio recorded. Speak clearly into the USB mic."})
 
     print(f"[USB MIC SPEECH] Recognized: '{recognized_text}'")
     transcript = recognized_text.upper()
 
-    # Route extraction
     target = None
     if "BASE" in transcript or "HOME" in transcript or "STATION" in transcript or " POINT S" in transcript or " TO S" in transcript:
         target = "S"
@@ -314,38 +337,6 @@ def handle_listen_usb_mic():
         return jsonify({"success": True, "text": recognized_text, "message": f"Heard '{recognized_text}' ➔ Navigating to {target}"})
 
     return jsonify({"success": False, "text": recognized_text, "message": f"Could not find destination in '{recognized_text}'"})
-
-@app.route('/voice', methods=['POST'])
-def handle_voice():
-    global is_navigating
-    data = request.json or {}
-    transcript = (data.get('text') or '').upper()
-    print(f"[VOICE] Heard: {transcript}")
-
-    target = None
-    if "BASE" in transcript or "HOME" in transcript or "STATION" in transcript or " POINT S" in transcript or " TO S" in transcript:
-        target = "S"
-    elif "POINT A" in transcript or " TO A" in transcript or transcript.endswith(" A"):
-        target = "A"
-    elif "POINT B" in transcript or " TO B" in transcript or transcript.endswith(" B"):
-        target = "B"
-    elif "POINT C" in transcript or " TO C" in transcript or transcript.endswith(" C"):
-        target = "C"
-    elif "POINT D" in transcript or " TO D" in transcript or transcript.endswith(" D"):
-        target = "D"
-    else:
-        match = re.search(r'\b([A-D]|S)\b', transcript)
-        if match:
-            target = match.group(1)
-
-    if target:
-        if is_navigating:
-            return jsonify({"success": False, "message": "Robot currently busy navigating."})
-        is_navigating = True
-        threading.Thread(target=execute_navigation, args=(target,), daemon=True).start()
-        return jsonify({"success": True, "message": f"Voice recognized: Navigating to Point {target}"})
-
-    return jsonify({"success": False, "message": f"Could not extract destination from '{transcript}'"})
 
 if __name__ == '__main__':
     routes_file = os.path.join(os.path.dirname(__file__), 'routes.json')
