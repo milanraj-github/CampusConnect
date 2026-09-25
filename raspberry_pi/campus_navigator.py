@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Campus Connect - Graph & Moves Navigation Engine
-Translates user routes.json graph and moves into precise Arduino execution steps.
+Campus Connect - Graph & Moves Navigation Engine with Dynamic Rerouting
+Supports dynamic Dijkstra path calculation with blocked edge / obstacle avoidance.
 """
 
 import json
@@ -22,7 +22,7 @@ TURN_CMD_MAP = {
 class CampusNavigator:
     def __init__(self, routes_file='routes.json', base_drive_time=2.5):
         self.routes_file = routes_file
-        self.base_drive_time = base_drive_time  # Seconds per distance unit '1'
+        self.base_drive_time = base_drive_time
         self.graph = {}
         self.moves = {}
         self.nodes = {}
@@ -35,17 +35,22 @@ class CampusNavigator:
         self.graph = data.get('graph', {})
         self.moves = data.get('moves', {})
         
-        # Populate nodes from graph keys
         for k in self.graph.keys():
             self.nodes[k] = {"id": k, "name": f"Point {k}" if k != "S" else "Base Station (S)"}
 
-    def dijkstra(self, start_id, target_id):
-        """Calculates shortest sequence of nodes using Dijkstra."""
+    def dijkstra(self, start_id, target_id, blocked_edges=None):
+        """
+        Calculates shortest path using Dijkstra, avoiding any temporarily blocked edges.
+        blocked_edges is a set of tuples: e.g. {('S', 'A'), ('A', 'S')}
+        """
         if start_id not in self.graph or target_id not in self.graph:
             return None, float('inf')
 
         if start_id == target_id:
             return [start_id], 0
+
+        if blocked_edges is None:
+            blocked_edges = set()
 
         distances = {node: float('inf') for node in self.graph}
         distances[start_id] = 0
@@ -62,6 +67,10 @@ class CampusNavigator:
                 continue
 
             for neighbor, weight in self.graph[curr_node].items():
+                # Skip blocked obstacle paths
+                if (curr_node, neighbor) in blocked_edges or (neighbor, curr_node) in blocked_edges:
+                    continue
+
                 distance = curr_dist + weight
                 if distance < distances[neighbor]:
                     distances[neighbor] = distance
@@ -80,9 +89,6 @@ class CampusNavigator:
         return None, float('inf')
 
     def get_motion_commands_for_path(self, path):
-        """
-        Converts a path (e.g. ['S', 'A', 'B']) into sequential sub-moves from 'moves'.
-        """
         if not path or len(path) < 2:
             return []
 
@@ -97,7 +103,6 @@ class CampusNavigator:
                 print(f"[WARN] No move entry found for '{key}' in routes.json!")
                 continue
 
-            direction = move_info.get('direction', 'N')
             commands = move_info.get('commands', [])
 
             for cmd_pair in commands:
@@ -110,7 +115,9 @@ class CampusNavigator:
                         'type': 'TURN',
                         'action': f"Turn {val}° {'LEFT' if action_type == 'L' else 'RIGHT'}",
                         'arduino_cmd': arduino_code,
-                        'leg': key
+                        'leg': key,
+                        'from_node': u,
+                        'to_node': v
                     })
                 elif action_type == 'F':
                     drive_secs = float(val) * self.base_drive_time
@@ -119,7 +126,9 @@ class CampusNavigator:
                         'action': f"Drive Forward ({val} units / {drive_secs:.1f}s)",
                         'arduino_cmd': 'W',
                         'duration': drive_secs,
-                        'leg': key
+                        'leg': key,
+                        'from_node': u,
+                        'to_node': v
                     })
                 elif action_type == 'B':
                     drive_secs = float(val) * self.base_drive_time
@@ -128,21 +137,9 @@ class CampusNavigator:
                         'action': f"Drive Backward ({val} units / {drive_secs:.1f}s)",
                         'arduino_cmd': 'S',
                         'duration': drive_secs,
-                        'leg': key
+                        'leg': key,
+                        'from_node': u,
+                        'to_node': v
                     })
 
         return all_steps
-
-if __name__ == '__main__':
-    nav = CampusNavigator('routes.json')
-    p, d = nav.dijkstra('S', 'A')
-    print(f"Path S->A: {p} (dist: {d})")
-    steps = nav.get_motion_commands_for_path(p)
-    for s in steps:
-        print(f"  -> {s['action']} (Cmd: {s['arduino_cmd']})")
-
-    p2, d2 = nav.dijkstra('A', 'S')
-    print(f"\nPath A->S: {p2} (dist: {d2})")
-    steps2 = nav.get_motion_commands_for_path(p2)
-    for s in steps2:
-        print(f"  -> {s['action']} (Cmd: {s['arduino_cmd']})")

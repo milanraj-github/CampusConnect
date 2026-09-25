@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
-Features:
-- Live Camera Video Streaming (Picamera2 / rpicam)
-- HC-SR04 Obstacle Detection & Bluetooth Voice Alerts
-- Dijkstra Graph & Moves Autonomous Navigation
-- USB Microphone Speech Recognition
-- Real-Time Manual Touch & Keyboard Teleop Control
+With Ultrasonic Obstacle Voice Announcements ("Obstacle detected, rerouting") & Dynamic Dijkstra Rerouting.
 """
 
 import os
@@ -92,12 +87,12 @@ def find_arduino():
 def speak_alert(text):
     global last_voice_alert_time
     now = time.time()
-    if now - last_voice_alert_time < 3.5:
+    if now - last_voice_alert_time < 2.5:
         return
     last_voice_alert_time = now
-    print(f"[AUDIO ALERT] 🔊 {text}")
+    print(f"[SPEAKER ALERT] 🔊 {text}")
     try:
-        subprocess.Popen(["espeak", "-v", "en-us", "-s", "145", text],
+        subprocess.Popen(["espeak", "-v", "en-us", "-s", "140", text],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
@@ -125,6 +120,7 @@ def serial_telemetry_loop():
                 if arduino_serial.in_waiting > 0:
                     line = arduino_serial.readline().decode('utf-8', errors='ignore').strip()
                     if line.startswith("YAW:"):
+                        # Format: YAW:+0.0|DIST:15.2|OBST:1|STATE:OBSTACLE_DETECTED
                         parts = line.split('|')
                         for p in parts:
                             if p.startswith("YAW:"):
@@ -133,9 +129,6 @@ def serial_telemetry_loop():
                                 current_distance = float(p.replace("DIST:", ""))
                             elif p.startswith("OBST:"):
                                 is_obst = (p.replace("OBST:", "") == "1")
-                                if is_obst and not obstacle_detected:
-                                    speak_alert("Warning! Object detected ahead. Stopping robot.")
-                                    robot_status = "⚠️ Obstacle Detected Ahead! Robot Stopped."
                                 obstacle_detected = is_obst
             except Exception:
                 pass
@@ -150,7 +143,7 @@ def send_cmd(cmd_str):
         except Exception as e:
             print(f"[ERROR] Serial write error: {e}")
 
-# Autonomous Navigation Worker
+# Autonomous Navigation with Obstacle Voice Alert & Rerouting
 def execute_navigation(destination):
     global current_location, robot_status, is_navigating, obstacle_detected
 
@@ -159,64 +152,89 @@ def execute_navigation(destination):
         is_navigating = False
         return
 
-    path, dist = nav_engine.dijkstra(current_location, destination)
-    if not path or len(path) < 2:
-        robot_status = f"No path found to {destination}"
-        is_navigating = False
-        return
+    blocked_edges = set()
 
-    robot_status = f"Navigating: {' ➔ '.join(path)}"
-    print(f"\n[NAV] Starting Navigation: {' -> '.join(path)}")
+    while is_navigating and current_location != destination:
+        path, dist = nav_engine.dijkstra(current_location, destination, blocked_edges)
+        if not path or len(path) < 2:
+            robot_status = f"No alternative path to {destination}"
+            speak_alert("No alternative route available. Please clear the obstacle.")
+            is_navigating = False
+            return
 
-    motion_steps = nav_engine.get_motion_commands_for_path(path)
+        robot_status = f"Navigating: {' ➔ '.join(path)}"
+        print(f"\n[NAV] Following Path: {' -> '.join(path)}")
 
-    for idx, step in enumerate(motion_steps):
-        if not is_navigating:
-            break
+        motion_steps = nav_engine.get_motion_commands_for_path(path)
+        path_interrupted = False
 
-        step_type = step['type']
-        action_name = step['action']
-        cmd = step['arduino_cmd']
-        leg = step['leg']
+        for idx, step in enumerate(motion_steps):
+            if not is_navigating:
+                break
 
-        robot_status = f"[{leg}] {action_name}"
-        print(f"[NAV Step {idx+1}/{len(motion_steps)}] {action_name} -> Send '{cmd}'")
+            step_type = step['type']
+            action_name = step['action']
+            cmd = step['arduino_cmd']
+            leg = step['leg']
+            u = step.get('from_node')
+            v = step.get('to_node')
 
-        if step_type == 'TURN':
-            if cmd:
-                send_cmd(cmd)
-                time.sleep(2.2)
-        elif step_type == 'DRIVE':
-            if cmd == 'W' and obstacle_detected:
-                speak_alert("Path blocked. Waiting for obstacle to clear.")
-                robot_status = "⚠️ Path Blocked! Waiting for obstacle to clear..."
-                while obstacle_detected and is_navigating:
-                    send_cmd('X')
-                    time.sleep(0.5)
+            robot_status = f"[{leg}] {action_name}"
+            print(f"[NAV Step {idx+1}/{len(motion_steps)}] {action_name} -> Send '{cmd}'")
 
-            send_cmd(cmd)
-            duration = step.get('duration', 2.5)
-            
-            start_t = time.time()
-            while time.time() - start_t < duration:
-                if not is_navigating:
-                    break
+            if step_type == 'TURN':
+                if cmd:
+                    send_cmd(cmd)
+                    time.sleep(2.2)
+            elif step_type == 'DRIVE':
+                # Check for obstacle before starting to drive forward
                 if cmd == 'W' and obstacle_detected:
                     send_cmd('X')
-                    robot_status = "⚠️ Obstacle in front! Paused."
-                    time.sleep(0.5)
-                    continue
-                time.sleep(0.1)
+                    speak_alert("Obstacle detected! Rerouting.")
+                    robot_status = f"⚠️ Obstacle on {leg}! Rerouting..."
+                    blocked_edges.add((u, v))
+                    blocked_edges.add((v, u))
+                    path_interrupted = True
+                    time.sleep(1.0)
+                    break
 
-            send_cmd('X')
-            time.sleep(0.6)
+                send_cmd(cmd)
+                duration = step.get('duration', 2.5)
+                
+                start_t = time.time()
+                while time.time() - start_t < duration:
+                    if not is_navigating:
+                        break
+                    
+                    # If obstacle suddenly appears during forward drive
+                    if cmd == 'W' and obstacle_detected:
+                        send_cmd('X')
+                        speak_alert("Obstacle detected! Rerouting.")
+                        robot_status = f"⚠️ Obstacle on {leg}! Rerouting..."
+                        blocked_edges.add((u, v))
+                        blocked_edges.add((v, u))
+                        path_interrupted = True
+                        time.sleep(1.0)
+                        break
+                    
+                    time.sleep(0.08)
+
+                if path_interrupted:
+                    break
+
+                send_cmd('X')
+                current_location = v
+                time.sleep(0.6)
+
+        if not path_interrupted and current_location == destination:
+            break
 
     send_cmd('X')
-    current_location = destination
-    robot_status = f"Arrived at Point {destination} (Idle)"
+    if current_location == destination:
+        robot_status = f"Arrived at Point {destination} (Idle)"
+        speak_alert(f"Arrived at destination Point {destination}.")
     is_navigating = False
-    speak_alert(f"Arrived at destination Point {destination}.")
-    print(f"[NAV] Navigation Complete! Current Node: {current_location}\n")
+    print(f"[NAV] Navigation Finished! Current Location: {current_location}\n")
 
 # --- API Endpoints ---
 
@@ -249,7 +267,7 @@ def handle_navigate():
 @app.route('/api/manual_control', methods=['POST'])
 def handle_manual_control():
     global is_navigating, robot_status
-    is_navigating = False  # Manual command overrides navigation
+    is_navigating = False
     data = request.json or {}
     cmd = data.get('cmd')
     if cmd:
@@ -294,7 +312,6 @@ def handle_listen_usb_mic():
 
     audio_file = "robot_speech.wav"
     
-    # 1. Boost USB Mic capture volume to 100%
     try:
         subprocess.run(["amixer", "-c", "3", "sset", "Mic", "100%", "cap"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -303,14 +320,12 @@ def handle_listen_usb_mic():
     except Exception:
         pass
 
-    # 2. Record 4 seconds in clean 16kHz Mono format (allows full natural sentence)
     try:
         cmd = ["arecord", "-D", "plughw:3,0", "-d", "4", "-f", "S16_LE", "-r", "16000", "-c", "1", audio_file]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=6)
     except Exception as e:
         return jsonify({"success": False, "message": f"Mic recording error: {e}"})
 
-    # 3. Speech Recognition
     recognized_text = ""
     rec_error = ""
     try:
@@ -324,7 +339,7 @@ def handle_listen_usb_mic():
             try:
                 recognized_text = r.recognize_google(audio_data)
             except sr.UnknownValueError:
-                rec_error = "Could not understand audio. Please speak clearly into the mic."
+                rec_error = "Could not understand audio. Please speak clearly."
             except sr.RequestError as req_err:
                 rec_error = f"Speech API error: {req_err}"
     except Exception as e:
@@ -332,31 +347,23 @@ def handle_listen_usb_mic():
 
     if not recognized_text:
         print(f"[SPEECH FAIL] {rec_error}")
-        return jsonify({"success": False, "message": rec_error or "No speech detected. Speak clearly."})
+        return jsonify({"success": False, "message": rec_error or "No speech detected."})
 
     print(f"[USB MIC SPEECH] Recognized: '{recognized_text}'")
     transcript = recognized_text.upper().strip()
 
-    # Smart resilient destination extraction
     target = None
-
-    # Base Station / S keywords
     if any(k in transcript for k in ["BASE", "HOME", "STATION", "START", "CENTER", "POINT S", "TO S", "NODE S"]) or transcript == "S":
         target = "S"
-    # Point A keywords (including phonetics like "part a", "apple", "alpha")
     elif any(k in transcript for k in ["POINT A", "TO A", "NODE A", "PART A", "ALPHA", "FIRST", "LETTER A"]) or transcript.endswith(" A") or " A " in transcript or transcript == "A":
         target = "A"
-    # Point B keywords (including "bee", "be", "bravo", "boy")
     elif any(k in transcript for k in ["POINT B", "TO B", "NODE B", "PART B", "BRAVO", "BEE", "SECOND", "LETTER B"]) or transcript.endswith(" B") or " B " in transcript or transcript == "B":
         target = "B"
-    # Point C keywords (including "see", "sea", "charlie")
     elif any(k in transcript for k in ["POINT C", "TO C", "NODE C", "PART C", "CHARLIE", "SEE", "SEA", "THIRD", "LETTER C"]) or transcript.endswith(" C") or " C " in transcript or transcript == "C":
         target = "C"
-    # Point D keywords (including "dee", "delta", "dog")
     elif any(k in transcript for k in ["POINT D", "TO D", "NODE D", "PART D", "DELTA", "DEE", "FOURTH", "LETTER D"]) or transcript.endswith(" D") or " D " in transcript or transcript == "D":
         target = "D"
     else:
-        # Regex fallback for single letters
         match = re.search(r'\b([A-D]|S)\b', transcript)
         if match:
             target = match.group(1)
