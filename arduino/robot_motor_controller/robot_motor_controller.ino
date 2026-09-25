@@ -1,12 +1,12 @@
 /*
- * Campus Connect - Integrated Robot Controller with HC-SR04 Ultrasonic Obstacle Detection
+ * Campus Connect - Integrated Robot Controller with Robust HC-SR04 & MPU-6050
  * 
  * Pin Connections:
  *   HC-SR04 Ultrasonic Sensor:
  *     VCC  -> Arduino 5V
  *     GND  -> Arduino GND
  *     TRIG -> Arduino D12
- *     ECHO -> Arduino D13
+ *     ECHO -> Arduino D4   <-- (Changed from D13 to D4 to avoid Pin 13 LED interference!)
  * 
  *   MPU-6050:
  *     VCC -> 5V | GND -> GND | SCL -> A5 | SDA -> A4 | AD0 -> GND
@@ -19,9 +19,9 @@
 
 // --- HC-SR04 Ultrasonic Pins ---
 const int TRIG_PIN = 12;
-const int ECHO_PIN = 13;
+const int ECHO_PIN = 4; // Connected to D4 for 100% clean echo pulses
 
-const float OBSTACLE_THRESHOLD_CM = 20.0; // Distance in cm to trigger safety stop
+const float OBSTACLE_THRESHOLD_CM = 25.0; // Distance in cm to trigger obstacle alert & auto-stop
 
 // --- L298N Motor Pins ---
 const int ENA = 5;
@@ -95,7 +95,6 @@ void stopMotors() {
 }
 
 void moveForward(int spd) {
-  // Prevent moving forward if obstacle is right in front
   if (obstacle_detected) {
     stopMotors();
     current_motion = "BLOCKED";
@@ -124,20 +123,32 @@ void turnRight(int spd) {
   current_motion = "TURNING RIGHT";
 }
 
-// Ultrasonic Distance Measurement
+// Robust Ultrasonic Distance Measurement (3-sample filter)
 float readUltrasonicDistance() {
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+  long sum = 0;
+  int valid_samples = 0;
 
-  // Measure echo pulse (timeout 25000us ~ 4 meters max)
-  long duration = pulseIn(ECHO_PIN, HIGH, 25000);
-  if (duration == 0) {
-    return 999.0; // No echo / out of range
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+
+    // Timeout 30000us ~ 5 meters
+    long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+    if (duration > 50 && duration < 30000) {
+      sum += duration;
+      valid_samples++;
+    }
+    delayMicroseconds(500);
   }
-  return (duration * 0.0343) / 2.0; // in centimeters
+
+  if (valid_samples == 0) {
+    return 999.0;
+  }
+  long avg_duration = sum / valid_samples;
+  return (avg_duration * 0.0343) / 2.0; // cm
 }
 
 // Update IMU
@@ -147,7 +158,7 @@ void updateIMU() {
   prev_time = current_time;
 
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x47); // GYRO_ZOUT_H
+  Wire.write(0x47);
   byte err = Wire.endTransmission(false);
 
   if (err == 0) {
@@ -215,6 +226,7 @@ void setup() {
   // Ultrasonic Pins
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
+  digitalWrite(TRIG_PIN, LOW);
 
   // Motor Pins
   pinMode(ENA, OUTPUT);
@@ -246,21 +258,23 @@ void setup() {
   gyro_z_offset = (float)sum_z / 250.0;
   prev_time = millis();
 
-  Serial.println("\n[SYSTEM] Robot Ready with Ultrasonic & MPU-6050.");
+  Serial.println("\n[SYSTEM] Robot Ready! Ultrasonic on D12(TRIG)/D4(ECHO).");
 }
 
 unsigned long last_telemetry = 0;
 unsigned long last_sonar = 0;
 
 void loop() {
-  // 1. Read Ultrasonic Sensor every 60ms
-  if (millis() - last_sonar >= 60) {
+  // 1. Read Ultrasonic Distance every 50ms
+  if (millis() - last_sonar >= 50) {
     last_sonar = millis();
-    current_distance_cm = readUltrasonicDistance();
-    
-    if (current_distance_cm > 0 && current_distance_cm <= OBSTACLE_THRESHOLD_CM) {
+    float dist = readUltrasonicDistance();
+    if (dist > 0 && dist < 400.0) {
+      current_distance_cm = dist;
+    }
+
+    if (current_distance_cm <= OBSTACLE_THRESHOLD_CM) {
       obstacle_detected = true;
-      // Auto-brake if currently driving forward
       if (current_motion == "FORWARD") {
         stopMotors();
         current_motion = "OBSTACLE_DETECTED";
@@ -318,8 +332,8 @@ void loop() {
 
   updateIMU();
 
-  // 3. Telemetry Stream to Raspberry Pi (every 120ms)
-  if (millis() - last_telemetry >= 120) {
+  // 3. Telemetry Stream to Raspberry Pi (every 100ms)
+  if (millis() - last_telemetry >= 100) {
     last_telemetry = millis();
     Serial.print("YAW:");
     Serial.print(yaw_angle, 1);

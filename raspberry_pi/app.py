@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
-With Ultrasonic Obstacle Voice Announcements ("Obstacle detected, rerouting") & Dynamic Dijkstra Rerouting.
+With High-Definition Clear Voice Announcements & Robust Ultrasonic Obstacle Rerouting.
 """
 
 import os
@@ -79,23 +79,35 @@ def generate_video_frames():
         except Exception as err:
             print(f"[CAMERA STREAM ERROR] {err}")
 
-# --- HARDWARE CONNECTIVITY ---
-def find_arduino():
-    ports = glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')
-    return ports[0] if ports else None
-
+# --- HIGH-DEFINITION CLEAR AUDIO ANNOUNCEMENTS ---
 def speak_alert(text):
+    """Speaks text using PicoTTS or clear espeak voice over Bluetooth speaker."""
     global last_voice_alert_time
     now = time.time()
-    if now - last_voice_alert_time < 2.5:
+    if now - last_voice_alert_time < 2.0:
         return
     last_voice_alert_time = now
     print(f"[SPEAKER ALERT] 🔊 {text}")
+
+    # Try pico2wave for crystal clear natural human voice
     try:
-        subprocess.Popen(["espeak", "-v", "en-us", "-s", "140", text],
+        wav_path = "/tmp/alert.wav"
+        subprocess.run(["pico2wave", "-w", wav_path, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        subprocess.Popen(["aplay", wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    except Exception:
+        pass
+
+    # Fallback to clear, amplified espeak-ng voice
+    try:
+        subprocess.Popen(["espeak", "-v", "en-us", "-s", "135", "-a", "200", "-p", "50", text],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
+
+def find_arduino():
+    ports = glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')
+    return ports[0] if ports else None
 
 def init_serial():
     global arduino_serial
@@ -120,7 +132,7 @@ def serial_telemetry_loop():
                 if arduino_serial.in_waiting > 0:
                     line = arduino_serial.readline().decode('utf-8', errors='ignore').strip()
                     if line.startswith("YAW:"):
-                        # Format: YAW:+0.0|DIST:15.2|OBST:1|STATE:OBSTACLE_DETECTED
+                        # Format: YAW:+0.0|DIST:18.4|OBST:1|STATE:FORWARD
                         parts = line.split('|')
                         for p in parts:
                             if p.startswith("YAW:"):
@@ -132,7 +144,7 @@ def serial_telemetry_loop():
                                 obstacle_detected = is_obst
             except Exception:
                 pass
-        time.sleep(0.04)
+        time.sleep(0.03)
 
 def send_cmd(cmd_str):
     global arduino_serial
@@ -143,12 +155,16 @@ def send_cmd(cmd_str):
         except Exception as e:
             print(f"[ERROR] Serial write error: {e}")
 
-# Autonomous Navigation with Obstacle Voice Alert & Rerouting
+# Autonomous Navigation Worker
 def execute_navigation(destination):
     global current_location, robot_status, is_navigating, obstacle_detected
 
+    dest_name = "Base Station" if destination == "S" else f"Point {destination}"
+    speak_alert(f"Starting navigation to {dest_name}.")
+
     if current_location == destination:
-        robot_status = f"Already at Point {destination}"
+        robot_status = f"Already at {dest_name}"
+        speak_alert(f"Already at {dest_name}.")
         is_navigating = False
         return
 
@@ -157,8 +173,8 @@ def execute_navigation(destination):
     while is_navigating and current_location != destination:
         path, dist = nav_engine.dijkstra(current_location, destination, blocked_edges)
         if not path or len(path) < 2:
-            robot_status = f"No alternative path to {destination}"
-            speak_alert("No alternative route available. Please clear the obstacle.")
+            robot_status = f"No path found to {dest_name}"
+            speak_alert(f"Path is completely blocked. Cannot reach {dest_name}.")
             is_navigating = False
             return
 
@@ -187,7 +203,7 @@ def execute_navigation(destination):
                     send_cmd(cmd)
                     time.sleep(2.2)
             elif step_type == 'DRIVE':
-                # Check for obstacle before starting to drive forward
+                # Check obstacle before forward driving
                 if cmd == 'W' and obstacle_detected:
                     send_cmd('X')
                     speak_alert("Obstacle detected! Rerouting.")
@@ -195,7 +211,7 @@ def execute_navigation(destination):
                     blocked_edges.add((u, v))
                     blocked_edges.add((v, u))
                     path_interrupted = True
-                    time.sleep(1.0)
+                    time.sleep(1.2)
                     break
 
                 send_cmd(cmd)
@@ -206,7 +222,6 @@ def execute_navigation(destination):
                     if not is_navigating:
                         break
                     
-                    # If obstacle suddenly appears during forward drive
                     if cmd == 'W' and obstacle_detected:
                         send_cmd('X')
                         speak_alert("Obstacle detected! Rerouting.")
@@ -214,10 +229,10 @@ def execute_navigation(destination):
                         blocked_edges.add((u, v))
                         blocked_edges.add((v, u))
                         path_interrupted = True
-                        time.sleep(1.0)
+                        time.sleep(1.2)
                         break
                     
-                    time.sleep(0.08)
+                    time.sleep(0.05)
 
                 if path_interrupted:
                     break
@@ -231,10 +246,10 @@ def execute_navigation(destination):
 
     send_cmd('X')
     if current_location == destination:
-        robot_status = f"Arrived at Point {destination} (Idle)"
-        speak_alert(f"Arrived at destination Point {destination}.")
+        robot_status = f"Arrived at {dest_name} (Idle)"
+        speak_alert(f"Successfully arrived at {dest_name}.")
     is_navigating = False
-    print(f"[NAV] Navigation Finished! Current Location: {current_location}\n")
+    print(f"[NAV] Trip Finished! Current Location: {current_location}\n")
 
 # --- API Endpoints ---
 
@@ -346,7 +361,6 @@ def handle_listen_usb_mic():
         rec_error = f"Speech error: {e}"
 
     if not recognized_text:
-        print(f"[SPEECH FAIL] {rec_error}")
         return jsonify({"success": False, "message": rec_error or "No speech detected."})
 
     print(f"[USB MIC SPEECH] Recognized: '{recognized_text}'")
