@@ -368,8 +368,16 @@
       </div>
     </div>
 
-    <!-- Live Telemetry & Map -->
+    <!-- Live Camera Feed & Telemetry -->
     <div class="card">
+      <h2>📹 Live Rover Camera Feed</h2>
+      <div style="position: relative; width: 100%; border-radius: 8px; overflow: hidden; background: #000; display: flex; justify-content: center; align-items: center; min-height: 200px; margin-bottom: 16px; border: 1px solid var(--card-border);">
+        <img src="/video_feed" style="width: 100%; height: auto; max-height: 240px; object-fit: contain;" onerror="this.style.display='none'; document.getElementById('no-cam').style.display='block';" />
+        <div id="no-cam" style="display: none; color: var(--text-muted); font-size: 0.85rem; padding: 20px; text-align: center;">
+          📷 Camera initializing or disconnected. Connect camera and restart server.
+        </div>
+      </div>
+
       <h2>📊 Live Telemetry</h2>
       
       <div class="telemetry-grid">

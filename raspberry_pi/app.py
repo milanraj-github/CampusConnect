@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
-With HC-SR04 Obstacle Detection & Bluetooth Speaker Voice Announcements.
+Features:
+- Live Camera Video Streaming (CSI / USB Camera)
+- HC-SR04 Obstacle Detection & Bluetooth Voice Alerts
+- Dijkstra Graph & Moves Autonomous Navigation
+- USB Microphone Audio Endpoint
 """
 
 import os
@@ -11,7 +15,8 @@ import glob
 import re
 import threading
 import subprocess
-from flask import Flask, render_template, request, jsonify
+import cv2
+from flask import Flask, render_template, request, jsonify, Response
 import serial
 
 from campus_navigator import CampusNavigator
@@ -30,21 +35,48 @@ nav_engine = None
 
 last_voice_alert_time = 0
 
+# Video Capture Object
+camera = None
+
+def get_camera():
+    global camera
+    if camera is None or not camera.isOpened():
+        # Try V4L2 device 0 (Pi Camera / USB Cam)
+        camera = cv2.VideoCapture(0)
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+        camera.set(cv2.CAP_PROP_FPS, 20)
+    return camera
+
+def generate_video_frames():
+    cam = get_camera()
+    while True:
+        if cam and cam.isOpened():
+            success, frame = cam.read()
+            if not success:
+                time.sleep(0.05)
+                continue
+            
+            # Encode JPEG
+            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            if ret:
+                frame_bytes = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        else:
+            time.sleep(0.1)
+
 def find_arduino():
     ports = glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')
     return ports[0] if ports else None
 
 def speak_alert(text):
-    """Speaks text over Bluetooth speaker or default audio output."""
     global last_voice_alert_time
     now = time.time()
     if now - last_voice_alert_time < 3.5:
-        return # Debounce to prevent audio spam
-
+        return
     last_voice_alert_time = now
     print(f"[AUDIO ALERT] 🔊 {text}")
-
-    # Use espeak-ng / espeak or festival or flite
     try:
         subprocess.Popen(["espeak", "-v", "en-us", "-s", "145", text],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -74,7 +106,6 @@ def serial_telemetry_loop():
                 if arduino_serial.in_waiting > 0:
                     line = arduino_serial.readline().decode('utf-8', errors='ignore').strip()
                     if line.startswith("YAW:"):
-                        # Format: YAW:+0.0|DIST:15.2|OBST:1|STATE:OBSTACLE_DETECTED
                         parts = line.split('|')
                         for p in parts:
                             if p.startswith("YAW:"):
@@ -137,7 +168,6 @@ def execute_navigation(destination):
                 send_cmd(cmd)
                 time.sleep(2.2)
         elif step_type == 'DRIVE':
-            # Check obstacle before driving forward
             if cmd == 'W' and obstacle_detected:
                 speak_alert("Path blocked. Waiting for obstacle to clear.")
                 robot_status = "⚠️ Path Blocked! Waiting for obstacle to clear..."
@@ -145,14 +175,13 @@ def execute_navigation(destination):
                     send_cmd('X')
                     time.sleep(0.5)
 
-            send_cmd(cmd) # 'W' or 'S'
+            send_cmd(cmd)
             duration = step.get('duration', 2.5)
             
             start_t = time.time()
             while time.time() - start_t < duration:
                 if not is_navigating:
                     break
-                # If obstacle appears while driving forward, pause immediately
                 if cmd == 'W' and obstacle_detected:
                     send_cmd('X')
                     robot_status = "⚠️ Obstacle in front! Paused."
@@ -175,6 +204,12 @@ def execute_navigation(destination):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/video_feed')
+def video_feed():
+    """Video streaming route. Put this in the src attribute of an img tag."""
+    return Response(generate_video_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/navigate', methods=['POST'])
 def handle_navigate():
@@ -243,7 +278,7 @@ if __name__ == '__main__':
     nav_engine = CampusNavigator(routes_file)
     init_serial()
     print("\n" + "=" * 60)
-    print(" 🤖 CAMPUS CONNECT ROBOT SERVER WITH VOICE & ULTRASONIC")
+    print(" 🤖 CAMPUS CONNECT ROBOT SERVER WITH LIVE CAMERA & AUDIO")
     print(" Open in Browser: http://<RaspberryPi_IP>:5000")
     print("=" * 60 + "\n")
     app.run(host='0.0.0.0', port=5000, debug=False)
