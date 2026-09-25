@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>CampusConnect Rover</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent: #10b981;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 12px; padding-bottom: 30px; }
+    
+    header { text-align: center; margin-bottom: 16px; }
+    h1 { font-size: 1.5rem; color: var(--primary); }
+    p.sub { font-size: 0.85rem; color: var(--text-muted); }
+
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
+    }
+    .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+
+    /* Telemetry Dashboard */
+    .telemetry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .tele-box {
+      background: rgba(15, 23, 42, 0.6);
+      padding: 12px;
+      border-radius: 12px;
+      text-align: center;
+    }
+    .tele-val { font-size: 1.4rem; font-weight: bold; color: var(--accent); }
+    .tele-label { font-size: 0.75rem; color: var(--text-muted); }
+
+    /* Navigation Form */
+    select {
+      width: 100%;
+      padding: 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: white;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      margin-bottom: 10px;
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      transition: 0.2s;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-accent { background: var(--accent); color: white; margin-top: 10px; }
+    .btn-danger { background: var(--danger); color: white; margin-top: 10px; }
+    .btn:active { transform: scale(0.98); opacity: 0.9; }
+
+    /* Steps List */
+    .steps-container { margin-top: 14px; max-height: 220px; overflow-y: auto; }
+    .step-item {
+      background: #0f172a;
+      padding: 10px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+      border-left: 4px solid var(--primary);
+    }
+
+    /* Manual D-Pad */
+    .dpad-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .dpad-row { display: flex; gap: 10px; justify-content: center; width: 100%; }
+    .dpad-btn {
+      width: 75px;
+      height: 65px;
+      background: #334155;
+      border: none;
+      border-radius: 12px;
+      color: white;
+      font-size: 1.3rem;
+      font-weight: bold;
+      touch-action: manipulation;
+    }
+    .dpad-btn:active { background: var(--primary); }
+    .dpad-stop { background: var(--danger); width: 100%; max-width: 250px; }
+
+    /* 90 deg turn buttons */
+    .turn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .turn-btn {
+      padding: 10px;
+      background: #1e293b;
+      border: 1px solid #475569;
+      color: #93c5fd;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>🗺️ CampusConnect Rover</h1>
+    <p class="sub">Autonomous Navigation & Mobile Control</p>
+  </header>
+
+  <!-- Live Status -->
+  <div class="card">
+    <div class="card-title">📡 Live Status & Heading</div>
+    <div class="telemetry-grid">
+      <div class="tele-box">
+        <div id="tele-yaw" class="tele-val">0.0°</div>
+        <div class="tele-label">Heading (Yaw)</div>
+      </div>
+      <div class="tele-box">
+        <div id="tele-state" class="tele-val" style="font-size: 1.1rem;">STOPPED</div>
+        <div class="tele-label">Motion State</div>
+      </div>
+    </div>
+    <div id="nav-status-banner" style="margin-top: 8px; font-size: 0.8rem; color: #38bdf8; text-align: center;">Status: Ready</div>
+  </div>
+
+  <!-- Route Planner (Dijkstra) -->
+  <div class="card">
+    <div class="card-title">📍 Dijkstra Route Planner</div>
+    
+    <label style="font-size: 0.8rem; color: var(--text-muted);">Current Location:</label>
+    <select id="start-node">
+      {% for node in nodes %}
+        <option value="{{ node.id }}">{{ node.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label style="font-size: 0.8rem; color: var(--text-muted);">Destination:</label>
+    <select id="end-node">
+      {% for node in nodes %}
+        <option value="{{ node.id }}" {% if loop.index == 2 %}selected{% endif %}>{{ node.name }}</option>
+      {% endfor %}
+    </select>
+
+    <button class="btn btn-primary" onclick="planRoute()">🔍 Calculate Shortest Path</button>
+
+    <div id="route-result" style="display: none;">
+      <div id="route-summary" style="margin-top: 10px; font-weight: bold; font-size: 0.9rem; color: var(--accent);"></div>
+      <div id="steps-list" class="steps-container"></div>
+      
+      <button id="start-nav-btn" class="btn btn-accent" onclick="startNavigation()">🚀 Start Auto-Navigation</button>
+      <button id="stop-nav-btn" class="btn btn-danger" onclick="stopNavigation()" style="display:none;">🛑 Halt Navigation</button>
+    </div>
+  </div>
+
+  <!-- Manual Touch D-Pad -->
+  <div class="card">
+    <div class="card-title">🎮 Mobile Touch Controls</div>
+    <div class="dpad-container">
+      <div class="dpad-row">
+        <button class="dpad-btn" onclick="sendCmd('W')">▲</button>
+      </div>
+      <div class="dpad-row">
+        <button class="dpad-btn" onclick="sendCmd('A')">◀</button>
+        <button class="dpad-btn" onclick="sendCmd('X')" style="background: #dc2626;">⏹</button>
+        <button class="dpad-btn" onclick="sendCmd('D')">▶</button>
+      </div>
+      <div class="dpad-row">
+        <button class="dpad-btn" onclick="sendCmd('S')">▼</button>
+      </div>
+    </div>
+
+    <!-- Precision Auto-turns -->
+    <div class="turn-grid">
+      <button class="turn-btn" onclick="sendCmd('1')">↰ 90° Left</button>
+      <button class="turn-btn" onclick="sendCmd('2')">↱ 90° Right</button>
+      <button class="turn-btn" onclick="sendCmd('3')">⮌ 180° U-Turn</button>
+      <button class="turn-btn" onclick="sendCmd('Z')">🎯 Zero Heading</button>
+    </div>
+  </div>
+
+  <script>
+    let plannedSteps = [];
+
+    // Poll Telemetry
+    setInterval(async () => {
+      try {
+        const res = await fetch('/api/telemetry');
+        const data = await res.json();
+        document.getElementById('tele-yaw').innerText = (data.yaw >= 0 ? '+' : '') + data.yaw.toFixed(1) + '°';
+        document.getElementById('tele-state').innerText = data.state;
+        document.getElementById('nav-status-banner').innerText = 'Status: ' + (data.nav_status || 'Ready');
+      } catch (e) {}
+    }, 250);
+
+    // Plan Route via Dijkstra API
+    async function planRoute() {
+      const start = document.getElementById('start-node').value;
+      const destination = document.getElementById('end-node').value;
+
+      if (start === destination) {
+        alert("Start and destination cannot be the same!");
+        return;
+      }
+
+      const res = await fetch('/api/plan_route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start, destination })
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        alert(data.message);
+        return;
+      }
+
+      plannedSteps = data.steps;
+      document.getElementById('route-result').style.display = 'block';
+      document.getElementById('route-summary').innerText = `Path: ${data.path_names.join(' ➔ ')} (${data.total_distance}m total)`;
+
+      const stepsContainer = document.getElementById('steps-list');
+      stepsContainer.innerHTML = '';
+      data.steps.forEach(s => {
+        const div = document.createElement('div');
+        div.className = 'step-item';
+        div.innerHTML = `<strong>Step ${s.step_num}:</strong> ${s.turn_action} ➔ Drive to <em>${s.to_name}</em> (${s.distance_meters}m)`;
+        stepsContainer.appendChild(div);
+      });
+    }
+
+    // Start Auto-Nav
+    async function startNavigation() {
+      if (plannedSteps.length === 0) return;
+      document.getElementById('start-nav-btn').style.display = 'none';
+      document.getElementById('stop-nav-btn').style.display = 'block';
+
+      await fetch('/api/start_nav', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steps: plannedSteps })
+      });
+    }
+
+    // Stop Auto-Nav
+    async function stopNavigation() {
+      await fetch('/api/stop_nav', { method: 'POST' });
+      document.getElementById('start-nav-btn').style.display = 'block';
+      document.getElementById('stop-nav-btn').style.display = 'none';
+    }
+
+    // Manual Command
+    async function sendCmd(cmd) {
+      await fetch('/api/manual_control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd })
+      });
+    }
+  </script>
+</body>
+</html>
