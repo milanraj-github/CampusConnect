@@ -1,10 +1,27 @@
 /*
- * Campus Connect - Universal Angle Robot Controller
- * Supports all physical turns: 45°, 90°, 135°, 180° (Left and Right)
- * Uses automatic 0.5x scaling to map physical angles to calibrated sensor angles.
+ * Campus Connect - Integrated Robot Controller with HC-SR04 Ultrasonic Obstacle Detection
+ * 
+ * Pin Connections:
+ *   HC-SR04 Ultrasonic Sensor:
+ *     VCC  -> Arduino 5V
+ *     GND  -> Arduino GND
+ *     TRIG -> Arduino D12
+ *     ECHO -> Arduino D13
+ * 
+ *   MPU-6050:
+ *     VCC -> 5V | GND -> GND | SCL -> A5 | SDA -> A4 | AD0 -> GND
+ * 
+ *   L298N Motor Driver:
+ *     ENA -> D5 | ENB -> D6 | IN1 -> D8 | IN2 -> D9 | IN3 -> D10 | IN4 -> D11
  */
 
 #include <Wire.h>
+
+// --- HC-SR04 Ultrasonic Pins ---
+const int TRIG_PIN = 12;
+const int ECHO_PIN = 13;
+
+const float OBSTACLE_THRESHOLD_CM = 20.0; // Distance in cm to trigger safety stop
 
 // --- L298N Motor Pins ---
 const int ENA = 5;
@@ -20,8 +37,8 @@ int motor_speed = 200;
 bool INVERT_LEFT_MOTOR  = true;
 bool INVERT_RIGHT_MOTOR = true;
 
-// Calibration scale: physical degrees * 0.5 = sensor target degrees
-const float SENSOR_SCALE = 0.5; 
+// Calibration scale (physical deg * 0.5 = sensor target deg)
+const float SENSOR_SCALE = 0.5;
 
 // --- MPU-6050 Variables ---
 const int MPU_ADDR = 0x68;
@@ -32,6 +49,8 @@ float yaw_angle = 0.0;
 unsigned long prev_time = 0;
 
 String current_motion = "STOPPED";
+float current_distance_cm = 999.0;
+bool obstacle_detected = false;
 
 // --- Low Level Motor Drivers ---
 void setLeftMotor(int speed, bool forward) {
@@ -76,6 +95,12 @@ void stopMotors() {
 }
 
 void moveForward(int spd) {
+  // Prevent moving forward if obstacle is right in front
+  if (obstacle_detected) {
+    stopMotors();
+    current_motion = "BLOCKED";
+    return;
+  }
   setLeftMotor(spd, true);
   setRightMotor(spd, true);
   current_motion = "FORWARD";
@@ -97,6 +122,22 @@ void turnRight(int spd) {
   setLeftMotor(spd, false);  // Left wheels Reverse
   setRightMotor(spd, true);  // Right wheels Forward
   current_motion = "TURNING RIGHT";
+}
+
+// Ultrasonic Distance Measurement
+float readUltrasonicDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  // Measure echo pulse (timeout 25000us ~ 4 meters max)
+  long duration = pulseIn(ECHO_PIN, HIGH, 25000);
+  if (duration == 0) {
+    return 999.0; // No echo / out of range
+  }
+  return (duration * 0.0343) / 2.0; // in centimeters
 }
 
 // Update IMU
@@ -150,7 +191,7 @@ void executePreciseTurn(float sensor_target_deg, bool is_left, int turn_speed) {
     delay(5);
   }
 
-  // Active reverse counter-pulse to stop wheel momentum instantly
+  // Active reverse counter-pulse
   if (is_left) turnRight(150);
   else turnLeft(150);
   delay(35);
@@ -158,13 +199,8 @@ void executePreciseTurn(float sensor_target_deg, bool is_left, int turn_speed) {
   stopMotors();
   delay(80);
   updateIMU();
-
-  Serial.print("[AUTO TURN DONE] Sensor Deg: ");
-  Serial.print(abs(yaw_angle - start_yaw), 1);
-  Serial.println("°");
 }
 
-// Helper: Takes physical degrees (e.g. 45, 90, 135, 180) and applies calibration
 void executePhysicalTurn(float physical_deg, bool is_left) {
   float sensor_deg = physical_deg * SENSOR_SCALE;
   executePreciseTurn(sensor_deg, is_left, 175);
@@ -176,6 +212,11 @@ void setup() {
 
   Wire.setWireTimeout(10000, true);
 
+  // Ultrasonic Pins
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  // Motor Pins
   pinMode(ENA, OUTPUT);
   pinMode(ENB, OUTPUT);
   pinMode(IN1, OUTPUT);
@@ -205,18 +246,36 @@ void setup() {
   gyro_z_offset = (float)sum_z / 250.0;
   prev_time = millis();
 
-  Serial.println("\n[SYSTEM] Robot Ready! All angles (45°, 90°, 135°, 180°) active.");
+  Serial.println("\n[SYSTEM] Robot Ready with Ultrasonic & MPU-6050.");
 }
 
 unsigned long last_telemetry = 0;
+unsigned long last_sonar = 0;
 
 void loop() {
+  // 1. Read Ultrasonic Sensor every 60ms
+  if (millis() - last_sonar >= 60) {
+    last_sonar = millis();
+    current_distance_cm = readUltrasonicDistance();
+    
+    if (current_distance_cm > 0 && current_distance_cm <= OBSTACLE_THRESHOLD_CM) {
+      obstacle_detected = true;
+      // Auto-brake if currently driving forward
+      if (current_motion == "FORWARD") {
+        stopMotors();
+        current_motion = "OBSTACLE_DETECTED";
+      }
+    } else {
+      obstacle_detected = false;
+    }
+  }
+
+  // 2. Process incoming Serial Commands
   while (Serial.available() > 0) {
     char cmd = Serial.read();
 
     if (cmd == '\r' || cmd == '\n') continue;
 
-    // Direct movement
     if (cmd == ' ' || cmd == 'X' || cmd == 'x') {
       stopMotors();
       Serial.println("[ACTION] STOP");
@@ -237,66 +296,37 @@ void loop() {
       turnRight(motor_speed);
       Serial.println("[ACTION] TURN RIGHT");
     } 
-    // --- Turn Presets ---
-    // 90 deg
-    else if (cmd == '1') {
-      Serial.println("[AUTO] Turn 90° LEFT");
-      executePhysicalTurn(90.0, true);
-    }
-    else if (cmd == '2') {
-      Serial.println("[AUTO] Turn 90° RIGHT");
-      executePhysicalTurn(90.0, false);
-    }
-    // 180 deg
-    else if (cmd == '3') {
-      Serial.println("[AUTO] Turn 180° LEFT");
-      executePhysicalTurn(180.0, true);
-    }
-    else if (cmd == '4') {
-      Serial.println("[AUTO] Turn 180° RIGHT");
-      executePhysicalTurn(180.0, false);
-    }
-    // 45 deg
-    else if (cmd == '5') {
-      Serial.println("[AUTO] Turn 45° LEFT");
-      executePhysicalTurn(45.0, true);
-    }
-    else if (cmd == '6') {
-      Serial.println("[AUTO] Turn 45° RIGHT");
-      executePhysicalTurn(45.0, false);
-    }
-    // 135 deg
-    else if (cmd == '7') {
-      Serial.println("[AUTO] Turn 135° LEFT");
-      executePhysicalTurn(135.0, true);
-    }
-    else if (cmd == '8') {
-      Serial.println("[AUTO] Turn 135° RIGHT");
-      executePhysicalTurn(135.0, false);
-    }
-    // --- Utilities ---
+    // --- Angle Turns ---
+    else if (cmd == '1') executePhysicalTurn(90.0, true);
+    else if (cmd == '2') executePhysicalTurn(90.0, false);
+    else if (cmd == '3') executePhysicalTurn(180.0, true);
+    else if (cmd == '4') executePhysicalTurn(180.0, false);
+    else if (cmd == '5') executePhysicalTurn(45.0, true);
+    else if (cmd == '6') executePhysicalTurn(45.0, false);
+    else if (cmd == '7') executePhysicalTurn(135.0, true);
+    else if (cmd == '8') executePhysicalTurn(135.0, false);
     else if (cmd == '+' || cmd == '=') {
       motor_speed = min(255, motor_speed + 20);
-      Serial.print("[SPEED] "); Serial.println(motor_speed);
     } 
     else if (cmd == '-' || cmd == '_') {
       motor_speed = max(120, motor_speed - 20);
-      Serial.print("[SPEED] "); Serial.println(motor_speed);
     } 
     else if (cmd == 'Z' || cmd == 'z') {
       yaw_angle = 0.0;
-      Serial.println("[RESET] Yaw set to 0.0");
     }
   }
 
   updateIMU();
 
-  if (millis() - last_telemetry >= 150) {
+  // 3. Telemetry Stream to Raspberry Pi (every 120ms)
+  if (millis() - last_telemetry >= 120) {
     last_telemetry = millis();
     Serial.print("YAW:");
     Serial.print(yaw_angle, 1);
-    Serial.print("|SPEED:");
-    Serial.print(motor_speed);
+    Serial.print("|DIST:");
+    Serial.print(current_distance_cm, 1);
+    Serial.print("|OBST:");
+    Serial.print(obstacle_detected ? "1" : "0");
     Serial.print("|STATE:");
     Serial.println(current_motion);
   }

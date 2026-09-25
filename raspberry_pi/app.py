@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
-Executes Dijkstra pathfinding and exact 'moves' definitions from routes.json.
+With HC-SR04 Obstacle Detection & Bluetooth Speaker Voice Announcements.
 """
 
 import os
@@ -10,6 +10,7 @@ import time
 import glob
 import re
 import threading
+import subprocess
 from flask import Flask, render_template, request, jsonify
 import serial
 
@@ -21,13 +22,34 @@ app = Flask(__name__)
 current_location = "S"
 robot_status = "System Ready (Idle)"
 current_yaw = 0.0
+current_distance = 999.0
+obstacle_detected = False
 is_navigating = False
 arduino_serial = None
 nav_engine = None
 
+last_voice_alert_time = 0
+
 def find_arduino():
     ports = glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')
     return ports[0] if ports else None
+
+def speak_alert(text):
+    """Speaks text over Bluetooth speaker or default audio output."""
+    global last_voice_alert_time
+    now = time.time()
+    if now - last_voice_alert_time < 3.5:
+        return # Debounce to prevent audio spam
+
+    last_voice_alert_time = now
+    print(f"[AUDIO ALERT] 🔊 {text}")
+
+    # Use espeak-ng / espeak or festival or flite
+    try:
+        subprocess.Popen(["espeak", "-v", "en-us", "-s", "145", text],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
 
 def init_serial():
     global arduino_serial
@@ -45,20 +67,29 @@ def init_serial():
         print("[WARN] Arduino not detected. Running in simulated mode.")
 
 def serial_telemetry_loop():
-    global arduino_serial, current_yaw
+    global arduino_serial, current_yaw, current_distance, obstacle_detected, robot_status
     while True:
         if arduino_serial and arduino_serial.is_open:
             try:
                 if arduino_serial.in_waiting > 0:
                     line = arduino_serial.readline().decode('utf-8', errors='ignore').strip()
                     if line.startswith("YAW:"):
+                        # Format: YAW:+0.0|DIST:15.2|OBST:1|STATE:OBSTACLE_DETECTED
                         parts = line.split('|')
                         for p in parts:
                             if p.startswith("YAW:"):
                                 current_yaw = float(p.replace("YAW:", ""))
+                            elif p.startswith("DIST:"):
+                                current_distance = float(p.replace("DIST:", ""))
+                            elif p.startswith("OBST:"):
+                                is_obst = (p.replace("OBST:", "") == "1")
+                                if is_obst and not obstacle_detected:
+                                    speak_alert("Warning! Object detected ahead. Stopping robot.")
+                                    robot_status = "⚠️ Obstacle Detected Ahead! Robot Stopped."
+                                obstacle_detected = is_obst
             except Exception:
                 pass
-        time.sleep(0.05)
+        time.sleep(0.04)
 
 def send_cmd(cmd_str):
     global arduino_serial
@@ -71,7 +102,7 @@ def send_cmd(cmd_str):
 
 # Autonomous Navigation Worker
 def execute_navigation(destination):
-    global current_location, robot_status, is_navigating
+    global current_location, robot_status, is_navigating, obstacle_detected
 
     if current_location == destination:
         robot_status = f"Already at Point {destination}"
@@ -87,7 +118,6 @@ def execute_navigation(destination):
     robot_status = f"Navigating: {' ➔ '.join(path)}"
     print(f"\n[NAV] Starting Navigation: {' -> '.join(path)}")
 
-    # Get sequential commands from user's moves
     motion_steps = nav_engine.get_motion_commands_for_path(path)
 
     for idx, step in enumerate(motion_steps):
@@ -105,8 +135,16 @@ def execute_navigation(destination):
         if step_type == 'TURN':
             if cmd:
                 send_cmd(cmd)
-                time.sleep(2.2) # Allow auto-turn with deceleration to settle
+                time.sleep(2.2)
         elif step_type == 'DRIVE':
+            # Check obstacle before driving forward
+            if cmd == 'W' and obstacle_detected:
+                speak_alert("Path blocked. Waiting for obstacle to clear.")
+                robot_status = "⚠️ Path Blocked! Waiting for obstacle to clear..."
+                while obstacle_detected and is_navigating:
+                    send_cmd('X')
+                    time.sleep(0.5)
+
             send_cmd(cmd) # 'W' or 'S'
             duration = step.get('duration', 2.5)
             
@@ -114,15 +152,22 @@ def execute_navigation(destination):
             while time.time() - start_t < duration:
                 if not is_navigating:
                     break
+                # If obstacle appears while driving forward, pause immediately
+                if cmd == 'W' and obstacle_detected:
+                    send_cmd('X')
+                    robot_status = "⚠️ Obstacle in front! Paused."
+                    time.sleep(0.5)
+                    continue
                 time.sleep(0.1)
 
-            send_cmd('X') # Stop after drive
+            send_cmd('X')
             time.sleep(0.6)
 
     send_cmd('X')
     current_location = destination
     robot_status = f"Arrived at Point {destination} (Idle)"
     is_navigating = False
+    speak_alert(f"Arrived at destination Point {destination}.")
     print(f"[NAV] Navigation Complete! Current Node: {current_location}\n")
 
 # --- API Endpoints ---
@@ -153,6 +198,8 @@ def handle_current():
 
 @app.route('/robot_status')
 def handle_status():
+    if obstacle_detected:
+        return jsonify({"status": f"⚠️ Obstacle Detected at {current_distance:.1f}cm!"})
     return jsonify({"status": robot_status})
 
 @app.route('/imu')
@@ -196,7 +243,7 @@ if __name__ == '__main__':
     nav_engine = CampusNavigator(routes_file)
     init_serial()
     print("\n" + "=" * 60)
-    print(" 🤖 CAMPUS CONNECT AUTONOMOUS ROBOT SERVER ACTIVE")
+    print(" 🤖 CAMPUS CONNECT ROBOT SERVER WITH VOICE & ULTRASONIC")
     print(" Open in Browser: http://<RaspberryPi_IP>:5000")
     print("=" * 60 + "\n")
     app.run(host='0.0.0.0', port=5000, debug=False)
