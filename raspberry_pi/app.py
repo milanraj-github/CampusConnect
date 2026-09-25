@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
-With High-Definition Clear Voice Announcements & Robust Ultrasonic Obstacle Rerouting.
+Features:
+- Bulletproof Live MJPEG Camera Video Streaming with Auto-Cleanup
+- 15.0cm Ultrasonic Safety Zone & Dynamic Dijkstra Obstacle Rerouting
+- Crystal-Clear Multi-Engine Speaker Voice Output (Bluetooth / Audio)
+- USB Microphone Speech Recognition
+- Real-Time Manual Touch D-Pad & Keyboard Teleop Control
 """
 
 import os
@@ -18,7 +23,7 @@ from campus_navigator import CampusNavigator
 
 app = Flask(__name__)
 
-# State
+# System State
 current_location = "S"
 robot_status = "System Ready (Idle)"
 current_yaw = 0.0
@@ -30,80 +35,104 @@ nav_engine = None
 
 last_voice_alert_time = 0
 
-# --- NATIVE RASPBERRY PI CAMERA STREAMER ---
-picam2_obj = None
-
-def init_picamera():
-    global picam2_obj
-    try:
-        from picamera2 import Picamera2
-        picam2_obj = Picamera2()
-        config = picam2_obj.create_preview_configuration(main={"size": (640, 480), "format": "RGB888"})
-        picam2_obj.configure(config)
-        picam2_obj.start()
-        print("[CAMERA] Picamera2 initialized successfully!")
-    except Exception as e:
-        print(f"[CAMERA] Picamera2 init note: {e}")
-        picam2_obj = None
-
+# --- ROCK-SOLID LIVE CAMERA STREAM GENERATOR ---
 def generate_video_frames():
-    global picam2_obj
-    import cv2
-    
-    if picam2_obj:
-        while True:
-            try:
-                frame = picam2_obj.capture_array()
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                ret, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 65])
-                if ret:
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-                time.sleep(0.04)
-            except Exception:
-                time.sleep(0.1)
-    else:
-        cmd = ["rpicam-vid", "-t", "0", "--inline", "--width", "640", "--height", "480", "--codec", "mjpeg", "--framerate", "20", "-o", "-"]
-        try:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**6)
-            stream_bytes = b''
-            while True:
-                stream_bytes += p.stdout.read(1024)
-                a = stream_bytes.find(b'\xff\xd8')
-                b = stream_bytes.find(b'\xff\xd9')
-                if a != -1 and b != -1:
-                    jpg = stream_bytes[a:b+2]
-                    stream_bytes = stream_bytes[b+2:]
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
-        except Exception as err:
-            print(f"[CAMERA STREAM ERROR] {err}")
+    """Streams live MJPEG camera video. Cleans up processes to prevent camera hardware locks."""
+    # Kill any dangling camera processes first
+    os.system("pkill -9 -f rpicam-vid >/dev/null 2>&1")
+    os.system("pkill -9 -f libcamera-vid >/dev/null 2>&1")
+    time.sleep(0.15)
 
-# --- HIGH-DEFINITION CLEAR AUDIO ANNOUNCEMENTS ---
+    cam_cmd = "rpicam-vid"
+    if subprocess.call(["which", "rpicam-vid"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+        if subprocess.call(["which", "libcamera-vid"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+            cam_cmd = "libcamera-vid"
+
+    cmd = [
+        cam_cmd,
+        "-t", "0",
+        "--inline",
+        "--width", "640",
+        "--height", "480",
+        "--codec", "mjpeg",
+        "--framerate", "25",
+        "--nopreview",
+        "-o", "-"
+    ]
+
+    process = None
+    try:
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=65536)
+        buffer = b''
+        while True:
+            chunk = process.stdout.read(4096)
+            if not chunk:
+                break
+            buffer += chunk
+            a = buffer.find(b'\xff\xd8') # JPEG Start
+            if a != -1:
+                b = buffer.find(b'\xff\xd9', a + 2) # JPEG End
+                if b != -1:
+                    jpg_frame = buffer[a:b+2]
+                    buffer = buffer[b+2:]
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpg_frame + b'\r\n')
+            if len(buffer) > 250000:
+                buffer = b''
+    except GeneratorExit:
+        pass
+    except Exception as err:
+        print(f"[CAMERA STREAM NOTICE] {err}")
+    finally:
+        if process:
+            try:
+                process.terminate()
+                process.wait(timeout=0.4)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+
+# --- HIGH-QUALITY SPEAKER VOICE OUTPUT ---
 def speak_alert(text):
-    """Speaks text using PicoTTS or clear espeak voice over Bluetooth speaker."""
+    """Speaks clear audio through speaker using pico2wave / aplay / espeak pipeline."""
     global last_voice_alert_time
     now = time.time()
-    if now - last_voice_alert_time < 2.0:
+    if now - last_voice_alert_time < 1.5:
         return
     last_voice_alert_time = now
-    print(f"[SPEAKER ALERT] 🔊 {text}")
+    print(f"[SPEAKER ANNOUNCEMENT] 🔊 {text}")
 
-    # Try pico2wave for crystal clear natural human voice
-    try:
-        wav_path = "/tmp/alert.wav"
-        subprocess.run(["pico2wave", "-w", wav_path, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
-        subprocess.Popen(["aplay", wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return
-    except Exception:
-        pass
+    safe_text = re.sub(r'[^a-zA-Z0-9 .,!?]', '', text)
 
-    # Fallback to clear, amplified espeak-ng voice
-    try:
-        subprocess.Popen(["espeak", "-v", "en-us", "-s", "135", "-a", "200", "-p", "50", text],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+    def _play_speech():
+        # Pipeline 1: pico2wave + aplay (Natural clear voice routed to active Bluetooth / audio sink)
+        try:
+            wav_path = "/tmp/speech_alert.wav"
+            cmd_pico = f'pico2wave -w {wav_path} "{safe_text}" && aplay -q {wav_path}'
+            ret = os.system(cmd_pico)
+            if ret == 0:
+                return
+        except Exception:
+            pass
+
+        # Pipeline 2: espeak piped to aplay (Routes through ALSA / Bluetooth system default)
+        try:
+            cmd_pipe = f'espeak -v en-us -s 135 -a 200 "{safe_text}" --stdout | aplay -q'
+            ret = os.system(cmd_pipe)
+            if ret == 0:
+                return
+        except Exception:
+            pass
+
+        # Pipeline 3: Direct espeak
+        try:
+            os.system(f'espeak -v en-us -s 135 -a 200 "{safe_text}" >/dev/null 2>&1')
+        except Exception:
+            pass
+
+    threading.Thread(target=_play_speech, daemon=True).start()
 
 def find_arduino():
     ports = glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')
@@ -132,7 +161,7 @@ def serial_telemetry_loop():
                 if arduino_serial.in_waiting > 0:
                     line = arduino_serial.readline().decode('utf-8', errors='ignore').strip()
                     if line.startswith("YAW:"):
-                        # Format: YAW:+0.0|DIST:18.4|OBST:1|STATE:FORWARD
+                        # Format: YAW:+0.0|DIST:14.2|OBST:1|STATE:FORWARD
                         parts = line.split('|')
                         for p in parts:
                             if p.startswith("YAW:"):
@@ -155,11 +184,11 @@ def send_cmd(cmd_str):
         except Exception as e:
             print(f"[ERROR] Serial write error: {e}")
 
-# Autonomous Navigation Worker
+# Autonomous Navigation Worker with 15cm Obstacle Avoidance & Voice Announcements
 def execute_navigation(destination):
     global current_location, robot_status, is_navigating, obstacle_detected
 
-    dest_name = "Base Station" if destination == "S" else f"Point {destination}"
+    dest_name = "Base Station" if destination == "S" else f"Destination {destination}"
     speak_alert(f"Starting navigation to {dest_name}.")
 
     if current_location == destination:
@@ -173,13 +202,13 @@ def execute_navigation(destination):
     while is_navigating and current_location != destination:
         path, dist = nav_engine.dijkstra(current_location, destination, blocked_edges)
         if not path or len(path) < 2:
-            robot_status = f"No path found to {dest_name}"
-            speak_alert(f"Path is completely blocked. Cannot reach {dest_name}.")
+            robot_status = f"Path to {dest_name} is blocked"
+            speak_alert(f"All paths are blocked. Cannot reach {dest_name}.")
             is_navigating = False
             return
 
         robot_status = f"Navigating: {' ➔ '.join(path)}"
-        print(f"\n[NAV] Following Path: {' -> '.join(path)}")
+        print(f"\n[NAV] Following Shortest Path: {' -> '.join(path)}")
 
         motion_steps = nav_engine.get_motion_commands_for_path(path)
         path_interrupted = False
@@ -203,7 +232,7 @@ def execute_navigation(destination):
                     send_cmd(cmd)
                     time.sleep(2.2)
             elif step_type == 'DRIVE':
-                # Check obstacle before forward driving
+                # Check for obstacle within 15cm before driving forward
                 if cmd == 'W' and obstacle_detected:
                     send_cmd('X')
                     speak_alert("Obstacle detected! Rerouting.")
@@ -232,7 +261,7 @@ def execute_navigation(destination):
                         time.sleep(1.2)
                         break
                     
-                    time.sleep(0.05)
+                    time.sleep(0.04)
 
                 if path_interrupted:
                     break
@@ -249,7 +278,7 @@ def execute_navigation(destination):
         robot_status = f"Arrived at {dest_name} (Idle)"
         speak_alert(f"Successfully arrived at {dest_name}.")
     is_navigating = False
-    print(f"[NAV] Trip Finished! Current Location: {current_location}\n")
+    print(f"[NAV] Trip Complete! Current Location: {current_location}\n")
 
 # --- API Endpoints ---
 
@@ -261,6 +290,11 @@ def index():
 def video_feed():
     return Response(generate_video_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/test_speaker', methods=['POST'])
+def handle_test_speaker():
+    speak_alert("Bluetooth speaker test. Voice system is fully operational.")
+    return jsonify({"success": True, "message": "Spoke test phrase through speaker."})
 
 @app.route('/navigate', methods=['POST'])
 def handle_navigate():
@@ -299,6 +333,8 @@ def handle_manual_control():
             '4': 'Turn 180° Right',
             '5': 'Turn 45° Left',
             '6': 'Turn 45° Right',
+            '7': 'Turn 135° Left',
+            '8': 'Turn 135° Right',
             'Z': 'Heading Reset to 0°'
         }
         robot_status = cmd_labels.get(cmd, f"Command '{cmd}' Executed")
@@ -354,13 +390,14 @@ def handle_listen_usb_mic():
             try:
                 recognized_text = r.recognize_google(audio_data)
             except sr.UnknownValueError:
-                rec_error = "Could not understand audio. Please speak clearly."
+                rec_error = "Could not understand audio. Please speak clearly into the mic."
             except sr.RequestError as req_err:
                 rec_error = f"Speech API error: {req_err}"
     except Exception as e:
         rec_error = f"Speech error: {e}"
 
     if not recognized_text:
+        print(f"[SPEECH FAIL] {rec_error}")
         return jsonify({"success": False, "message": rec_error or "No speech detected."})
 
     print(f"[USB MIC SPEECH] Recognized: '{recognized_text}'")
@@ -387,13 +424,12 @@ def handle_listen_usb_mic():
         threading.Thread(target=execute_navigation, args=(target,), daemon=True).start()
         return jsonify({"success": True, "text": recognized_text, "message": f"Heard '{recognized_text}' ➔ Navigating to Point {target}"})
 
-    return jsonify({"success": False, "text": recognized_text, "message": f"Heard '{recognized_text}'. Say e.g. 'Navigate to A', 'Point B', or 'Base Station'."})
+    return jsonify({"success": False, "text": recognized_text, "message": f"Heard '{recognized_text}'. Say e.g. 'Navigate to Point A', 'Point B', or 'Base Station'."})
 
 if __name__ == '__main__':
     routes_file = os.path.join(os.path.dirname(__file__), 'routes.json')
     nav_engine = CampusNavigator(routes_file)
     init_serial()
-    init_picamera()
     print("\n" + "=" * 60)
     print(" 🤖 CAMPUS CONNECT ROBOT SERVER ACTIVE")
     print(" Open in Browser: http://<RaspberryPi_IP>:5000")
