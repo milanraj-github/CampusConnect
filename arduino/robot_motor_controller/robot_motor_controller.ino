@@ -1,8 +1,7 @@
 /*
- * Campus Connect - Integrated Robot Motor & MPU-6050 Controller
- * 
- * CALIBRATED ANGLE TARGETS:
- * Target angles scaled to produce exact physical 90° and 180° turns.
+ * Campus Connect - Universal Angle Robot Controller
+ * Supports all physical turns: 45°, 90°, 135°, 180° (Left and Right)
+ * Uses automatic 0.5x scaling to map physical angles to calibrated sensor angles.
  */
 
 #include <Wire.h>
@@ -21,10 +20,8 @@ int motor_speed = 200;
 bool INVERT_LEFT_MOTOR  = true;
 bool INVERT_RIGHT_MOTOR = true;
 
-// --- CALIBRATED TURNING ANGLES ---
-// Reduced to produce exact physical 90° and 180° turns on your chassis
-const float TARGET_90_DEG  = 45.0;   // Sensor degrees corresponding to physical 90° turn
-const float TARGET_180_DEG = 90.0;   // Sensor degrees corresponding to physical 180° turn
+// Calibration scale: physical degrees * 0.5 = sensor target degrees
+const float SENSOR_SCALE = 0.5; 
 
 // --- MPU-6050 Variables ---
 const int MPU_ADDR = 0x68;
@@ -126,10 +123,10 @@ void updateIMU() {
   }
 }
 
-// Calibrated Precision Turn Function
-void executePreciseTurn(float target_deg, bool is_left, int turn_speed) {
+// Precision Closed-Loop Turn
+void executePreciseTurn(float sensor_target_deg, bool is_left, int turn_speed) {
   float start_yaw = yaw_angle;
-  unsigned long timeout = millis() + 3000;
+  unsigned long timeout = millis() + 4000;
 
   int slow_spd = 130;
   float slow_down_lead = 15.0;
@@ -139,7 +136,7 @@ void executePreciseTurn(float target_deg, bool is_left, int turn_speed) {
     updateIMU();
     
     float rotated = abs(yaw_angle - start_yaw);
-    float remaining = target_deg - rotated;
+    float remaining = sensor_target_deg - rotated;
 
     if (remaining <= brake_lead) {
       break;
@@ -162,9 +159,15 @@ void executePreciseTurn(float target_deg, bool is_left, int turn_speed) {
   delay(80);
   updateIMU();
 
-  Serial.print("[AUTO TURN DONE] Rotated: ");
+  Serial.print("[AUTO TURN DONE] Sensor Deg: ");
   Serial.print(abs(yaw_angle - start_yaw), 1);
   Serial.println("°");
+}
+
+// Helper: Takes physical degrees (e.g. 45, 90, 135, 180) and applies calibration
+void executePhysicalTurn(float physical_deg, bool is_left) {
+  float sensor_deg = physical_deg * SENSOR_SCALE;
+  executePreciseTurn(sensor_deg, is_left, 175);
 }
 
 void setup() {
@@ -202,7 +205,7 @@ void setup() {
   gyro_z_offset = (float)sum_z / 250.0;
   prev_time = millis();
 
-  Serial.println("\n[SYSTEM] Robot Ready! Calibrated 90° & 180° active.");
+  Serial.println("\n[SYSTEM] Robot Ready! All angles (45°, 90°, 135°, 180°) active.");
 }
 
 unsigned long last_telemetry = 0;
@@ -213,6 +216,7 @@ void loop() {
 
     if (cmd == '\r' || cmd == '\n') continue;
 
+    // Direct movement
     if (cmd == ' ' || cmd == 'X' || cmd == 'x') {
       stopMotors();
       Serial.println("[ACTION] STOP");
@@ -225,31 +229,52 @@ void loop() {
       moveBackward(motor_speed);
       Serial.println("[ACTION] BACKWARD");
     } 
-    else if (cmd == 'A' || cmd == 'a' || cmd == 'L' || cmd == 'l') {
+    else if (cmd == 'A' || cmd == 'a') {
       turnLeft(motor_speed);
       Serial.println("[ACTION] TURN LEFT");
     } 
-    else if (cmd == 'D' || cmd == 'd' || cmd == 'R' || cmd == 'r') {
+    else if (cmd == 'D' || cmd == 'd') {
       turnRight(motor_speed);
       Serial.println("[ACTION] TURN RIGHT");
     } 
-    // --- Precise Calibrated 90° & 180° Angle Turns ---
+    // --- Turn Presets ---
+    // 90 deg
     else if (cmd == '1') {
-      Serial.println("[AUTO] Turning 90° LEFT...");
-      executePreciseTurn(TARGET_90_DEG, true, 175);
+      Serial.println("[AUTO] Turn 90° LEFT");
+      executePhysicalTurn(90.0, true);
     }
     else if (cmd == '2') {
-      Serial.println("[AUTO] Turning 90° RIGHT...");
-      executePreciseTurn(TARGET_90_DEG, false, 175);
+      Serial.println("[AUTO] Turn 90° RIGHT");
+      executePhysicalTurn(90.0, false);
     }
+    // 180 deg
     else if (cmd == '3') {
-      Serial.println("[AUTO] Turning 180° LEFT (U-Turn)...");
-      executePreciseTurn(TARGET_180_DEG, true, 175);
+      Serial.println("[AUTO] Turn 180° LEFT");
+      executePhysicalTurn(180.0, true);
     }
     else if (cmd == '4') {
-      Serial.println("[AUTO] Turning 180° RIGHT (U-Turn)...");
-      executePreciseTurn(TARGET_180_DEG, false, 175);
+      Serial.println("[AUTO] Turn 180° RIGHT");
+      executePhysicalTurn(180.0, false);
     }
+    // 45 deg
+    else if (cmd == '5') {
+      Serial.println("[AUTO] Turn 45° LEFT");
+      executePhysicalTurn(45.0, true);
+    }
+    else if (cmd == '6') {
+      Serial.println("[AUTO] Turn 45° RIGHT");
+      executePhysicalTurn(45.0, false);
+    }
+    // 135 deg
+    else if (cmd == '7') {
+      Serial.println("[AUTO] Turn 135° LEFT");
+      executePhysicalTurn(135.0, true);
+    }
+    else if (cmd == '8') {
+      Serial.println("[AUTO] Turn 135° RIGHT");
+      executePhysicalTurn(135.0, false);
+    }
+    // --- Utilities ---
     else if (cmd == '+' || cmd == '=') {
       motor_speed = min(255, motor_speed + 20);
       Serial.print("[SPEED] "); Serial.println(motor_speed);

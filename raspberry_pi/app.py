@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
-Supports SVG Diamond Map, Voice Commands, Dijkstra Pathfinding, and Live Telemetry.
-Includes direct Reverse / Backward movement on return paths without 180° turns.
+Executes Dijkstra pathfinding and exact 'moves' definitions from routes.json.
 """
 
 import os
@@ -20,7 +19,6 @@ app = Flask(__name__)
 
 # State
 current_location = "S"
-current_robot_heading = 270  # Default facing West (towards A) or 0
 robot_status = "System Ready (Idle)"
 current_yaw = 0.0
 is_navigating = False
@@ -73,7 +71,7 @@ def send_cmd(cmd_str):
 
 # Autonomous Navigation Worker
 def execute_navigation(destination):
-    global current_location, current_robot_heading, robot_status, is_navigating
+    global current_location, robot_status, is_navigating
 
     if current_location == destination:
         robot_status = f"Already at Point {destination}"
@@ -87,51 +85,45 @@ def execute_navigation(destination):
         return
 
     robot_status = f"Navigating: {' ➔ '.join(path)}"
-    print(f"[NAV] Path: {' -> '.join(path)} ({dist}m) | Starting Heading: {current_robot_heading}°")
+    print(f"\n[NAV] Starting Navigation: {' -> '.join(path)}")
 
-    steps = nav_engine.generate_turn_by_turn(path, initial_heading=current_robot_heading)
+    # Get sequential commands from user's moves
+    motion_steps = nav_engine.get_motion_commands_for_path(path)
 
-    for step in steps:
+    for idx, step in enumerate(motion_steps):
         if not is_navigating:
             break
 
-        to_node = step['to_node']
-        turn_cmd = step.get('turn_cmd')
-        turn_action = step.get('turn_action', 'STRAIGHT')
-        drive_cmd = step.get('drive_cmd', 'W')
-        target_heading = step.get('target_heading', current_robot_heading)
+        step_type = step['type']
+        action_name = step['action']
+        cmd = step['arduino_cmd']
+        leg = step['leg']
 
-        # 1. Turn only if turn_cmd is specified (e.g. 90° Left or 90° Right)
-        if turn_cmd:
-            robot_status = f"{turn_action}..."
-            send_cmd(turn_cmd)
-            time.sleep(2.0)
+        robot_status = f"[{leg}] {action_name}"
+        print(f"[NAV Step {idx+1}/{len(motion_steps)}] {action_name} -> Send '{cmd}'")
 
-        current_robot_heading = target_heading
+        if step_type == 'TURN':
+            if cmd:
+                send_cmd(cmd)
+                time.sleep(2.2) # Allow auto-turn with deceleration to settle
+        elif step_type == 'DRIVE':
+            send_cmd(cmd) # 'W' or 'S'
+            duration = step.get('duration', 2.5)
+            
+            start_t = time.time()
+            while time.time() - start_t < duration:
+                if not is_navigating:
+                    break
+                time.sleep(0.1)
 
-        # 2. Drive (Forward 'W' or Backward 'S')
-        action_name = "Reversing back" if drive_cmd == 'S' else "Moving forward"
-        robot_status = f"{action_name} to Node {to_node}..."
-        print(f"[NAV] Step: {turn_action} -> Send '{drive_cmd}' to Node {to_node}")
-        
-        send_cmd(drive_cmd)
-        drive_time = step.get('drive_duration', 3.0)
-        
-        start_t = time.time()
-        while time.time() - start_t < drive_time:
-            if not is_navigating:
-                break
-            time.sleep(0.1)
-
-        # 3. Arrive & Stop at node
-        send_cmd('X')
-        current_location = to_node
-        time.sleep(0.8)
+            send_cmd('X') # Stop after drive
+            time.sleep(0.6)
 
     send_cmd('X')
+    current_location = destination
     robot_status = f"Arrived at Point {destination} (Idle)"
     is_navigating = False
-    print(f"[NAV] Finished at {current_location}, current heading: {current_robot_heading}°")
+    print(f"[NAV] Navigation Complete! Current Node: {current_location}\n")
 
 # --- API Endpoints ---
 
@@ -145,7 +137,7 @@ def handle_navigate():
     data = request.json or {}
     dest = (data.get('destination') or '').upper()
 
-    if dest not in nav_engine.nodes:
+    if dest not in nav_engine.graph:
         return jsonify({"success": False, "message": f"Invalid destination '{dest}'"}), 400
 
     if is_navigating:

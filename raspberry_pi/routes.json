@@ -1,28 +1,150 @@
 {
-  "campus_name": "Autonomous IMU Robot Navigation",
-  "nodes": [
-    { "id": "S", "name": "Base Station (S)", "x": 0, "y": 0 },
-    { "id": "B", "name": "Point B (North)", "x": 0, "y": 10 },
-    { "id": "D", "name": "Point D (East)", "x": 10, "y": 0 },
-    { "id": "C", "name": "Point C (South)", "x": 0, "y": -10 },
-    { "id": "A", "name": "Point A (West)", "x": -10, "y": 0 }
-  ],
-  "edges": [
-    { "from": "S", "to": "B", "distance_meters": 5, "heading_degrees": 0, "drive_time_seconds": 3.0 },
-    { "from": "B", "to": "S", "distance_meters": 5, "heading_degrees": 180, "drive_time_seconds": 3.0 },
-    { "from": "S", "to": "D", "distance_meters": 5, "heading_degrees": 90, "drive_time_seconds": 3.0 },
-    { "from": "D", "to": "S", "distance_meters": 5, "heading_degrees": 270, "drive_time_seconds": 3.0 },
-    { "from": "S", "to": "C", "distance_meters": 5, "heading_degrees": 180, "drive_time_seconds": 3.0 },
-    { "from": "C", "to": "S", "distance_meters": 5, "heading_degrees": 0, "drive_time_seconds": 3.0 },
-    { "from": "S", "to": "A", "distance_meters": 5, "heading_degrees": 270, "drive_time_seconds": 3.0 },
-    { "from": "A", "to": "S", "distance_meters": 5, "heading_degrees": 90, "drive_time_seconds": 3.0 },
-    { "from": "A", "to": "B", "distance_meters": 7, "heading_degrees": 45, "drive_time_seconds": 3.5 },
-    { "from": "B", "to": "A", "distance_meters": 7, "heading_degrees": 225, "drive_time_seconds": 3.5 },
-    { "from": "B", "to": "D", "distance_meters": 7, "heading_degrees": 135, "drive_time_seconds": 3.5 },
-    { "from": "D", "to": "B", "distance_meters": 7, "heading_degrees": 315, "drive_time_seconds": 3.5 },
-    { "from": "D", "to": "C", "distance_meters": 7, "heading_degrees": 225, "drive_time_seconds": 3.5 },
-    { "from": "C", "to": "D", "distance_meters": 7, "heading_degrees": 45, "drive_time_seconds": 3.5 },
-    { "from": "C", "to": "A", "distance_meters": 7, "heading_degrees": 315, "drive_time_seconds": 3.5 },
-    { "from": "A", "to": "C", "distance_meters": 7, "heading_degrees": 135, "drive_time_seconds": 3.5 }
-  ]
+  "graph": {
+    "S": {
+      "A": 5,
+      "B": 5,
+      "C": 5,
+      "D": 5
+    },
+    "A": {
+      "S": 5,
+      "B": 8,
+      "D": 8
+    },
+    "B": {
+      "S": 5,
+      "A": 8,
+      "C": 8
+    },
+    "C": {
+      "S": 5,
+      "B": 8,
+      "D": 8
+    },
+    "D": {
+      "S": 5,
+      "A": 8,
+      "C": 8
+    }
+  },
+  "moves": {
+    "S-A": {
+      "commands": [
+        ["L", 90],
+        ["F", 1]
+      ],
+      "direction": "W"
+    },
+    "A-S": {
+      "commands": [
+        ["L", 180],
+        ["F", 1],
+        ["L", 90]
+      ],
+      "direction": "E"
+    },
+    "S-B": {
+      "commands": [
+        ["F", 1]
+      ],
+      "direction": "N"
+    },
+    "B-S": {
+      "commands": [
+        ["L", 180],
+        ["F", 1],
+        ["L", 180]
+      ],
+      "direction": "S"
+    },
+    "S-C": {
+      "commands": [
+        ["R", 180],
+        ["F", 1]
+      ],
+      "direction": "S"
+    },
+    "C-S": {
+      "commands": [
+        ["R", 180],
+        ["F", 1]
+      ],
+      "direction": "N"
+    },
+    "S-D": {
+      "commands": [
+        ["R", 90],
+        ["F", 1]
+      ],
+      "direction": "E"
+    },
+    "D-S": {
+      "commands": [
+        ["R", 180],
+        ["F", 1],
+        ["R", 90]
+      ],
+      "direction": "W"
+    },
+    "A-B": {
+      "commands": [
+        ["R", 135],
+        ["F", 1.42],
+        ["L", 45]
+      ],
+      "direction": "N"
+    },
+    "B-A": {
+      "commands": [
+        ["L", 135],
+        ["F", 1.42],
+        ["R", 45]
+      ],
+      "direction": "W"
+    },
+    "B-C": {
+      "commands": [
+        ["L", 180],
+        ["F", 2]
+      ],
+      "direction": "W"
+    },
+    "C-B": {
+      "commands": [
+        ["R", 180],
+        ["F", 2]
+      ],
+      "direction": "N"
+    },
+    "C-D": {
+      "commands": [
+        ["L", 135],
+        ["F", 1.42],
+        ["R", 45]
+      ],
+      "direction": "S"
+    },
+    "D-C": {
+      "commands": [
+        ["R", 135],
+        ["F", 1.42],
+        ["L", 45]
+      ],
+      "direction": "E"
+    },
+    "D-A": {
+      "commands": [
+        ["L", 180],
+        ["F", 2]
+      ],
+      "direction": "N"
+    },
+    "A-D": {
+      "commands": [
+        ["R", 180],
+        ["F", 2]
+      ],
+      "direction": "S"
+    }
+  }
 }

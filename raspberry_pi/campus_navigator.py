@@ -1,53 +1,55 @@
 #!/usr/bin/env python3
 """
-Campus Connect - Dijkstra Shortest Path Navigation Engine
-Supports direct forward and reverse/backward motion without unnecessary 180° turns.
+Campus Connect - Graph & Moves Navigation Engine
+Translates user routes.json graph and moves into precise Arduino execution steps.
 """
 
 import json
 import heapq
-import math
+
+# Mapping turn commands to Arduino single-character codes
+TURN_CMD_MAP = {
+    ("L", 45): "5",
+    ("R", 45): "6",
+    ("L", 90): "1",
+    ("R", 90): "2",
+    ("L", 135): "7",
+    ("R", 135): "8",
+    ("L", 180): "3",
+    ("R", 180): "4",
+}
 
 class CampusNavigator:
-    def __init__(self, routes_file='routes.json'):
+    def __init__(self, routes_file='routes.json', base_drive_time=2.5):
         self.routes_file = routes_file
-        self.nodes = {}
+        self.base_drive_time = base_drive_time  # Seconds per distance unit '1'
         self.graph = {}
-        self.edges_info = {}
+        self.moves = {}
+        self.nodes = {}
         self.load_map()
 
     def load_map(self):
         with open(self.routes_file, 'r') as f:
             data = json.load(f)
 
-        self.campus_name = data.get('campus_name', 'Campus')
-        for node in data.get('nodes', []):
-            self.nodes[node['id']] = node
-            self.graph[node['id']] = {}
-
-        for edge in data.get('edges', []):
-            u = edge['from']
-            v = edge['to']
-            dist = edge['distance_meters']
-            heading = edge.get('heading_degrees', 0)
-            duration = edge.get('drive_time_seconds', 3.0)
-
-            if u in self.graph:
-                self.graph[u][v] = dist
-                self.edges_info[(u, v)] = {
-                    'heading': heading,
-                    'distance': dist,
-                    'duration': duration
-                }
+        self.graph = data.get('graph', {})
+        self.moves = data.get('moves', {})
+        
+        # Populate nodes from graph keys
+        for k in self.graph.keys():
+            self.nodes[k] = {"id": k, "name": f"Point {k}" if k != "S" else "Base Station (S)"}
 
     def dijkstra(self, start_id, target_id):
-        """Finds shortest path using Dijkstra's Algorithm."""
-        if start_id not in self.nodes or target_id not in self.nodes:
+        """Calculates shortest sequence of nodes using Dijkstra."""
+        if start_id not in self.graph or target_id not in self.graph:
             return None, float('inf')
 
-        distances = {node: float('inf') for node in self.nodes}
+        if start_id == target_id:
+            return [start_id], 0
+
+        distances = {node: float('inf') for node in self.graph}
         distances[start_id] = 0
-        previous = {node: None for node in self.nodes}
+        previous = {node: None for node in self.graph}
         pq = [(0, start_id)]
 
         while pq:
@@ -77,84 +79,70 @@ class CampusNavigator:
             return path, distances[target_id]
         return None, float('inf')
 
-    def generate_turn_by_turn(self, path, initial_heading=0):
+    def get_motion_commands_for_path(self, path):
         """
-        Translates node path into robot motion actions.
-        When moving backwards on a return path (180° difference), it moves BACKWARD directly without turning!
+        Converts a path (e.g. ['S', 'A', 'B']) into sequential sub-moves from 'moves'.
         """
         if not path or len(path) < 2:
             return []
 
-        steps = []
-        current_heading = initial_heading
-
+        all_steps = []
         for i in range(len(path) - 1):
             u = path[i]
             v = path[i + 1]
-            edge = self.edges_info.get((u, v), {'heading': 0, 'distance': 5, 'duration': 3.0})
-            target_heading = edge['heading']
+            key = f"{u}-{v}"
+            move_info = self.moves.get(key)
 
-            # Shortest relative turn angle (-180 to +180)
-            angle_diff = (target_heading - current_heading + 180) % 360 - 180
+            if not move_info:
+                print(f"[WARN] No move entry found for '{key}' in routes.json!")
+                continue
 
-            turn_action = None
-            turn_cmd = None
-            drive_cmd = 'W' # Default: Forward
-            new_heading = target_heading
+            direction = move_info.get('direction', 'N')
+            commands = move_info.get('commands', [])
 
-            if abs(angle_diff) < 30:
-                turn_action = "CONTINUE STRAIGHT"
-                turn_cmd = None
-                drive_cmd = 'W'
-                new_heading = target_heading
-            elif 60 <= angle_diff <= 120:
-                turn_action = "TURN 90° RIGHT"
-                turn_cmd = '2'
-                drive_cmd = 'W'
-                new_heading = target_heading
-            elif -120 <= angle_diff <= -60:
-                turn_action = "TURN 90° LEFT"
-                turn_cmd = '1'
-                drive_cmd = 'W'
-                new_heading = target_heading
-            elif abs(angle_diff) >= 150:
-                # Opposite return path -> Reverse directly without 180° rotation!
-                turn_action = "REVERSE / BACKWARD (No 180° Turn)"
-                turn_cmd = None
-                drive_cmd = 'S' # Drive Backward
-                new_heading = current_heading # Heading stays same since bot didn't rotate
+            for cmd_pair in commands:
+                action_type = cmd_pair[0] # 'L', 'R', 'F', 'B'
+                val = cmd_pair[1]
 
-            from_name = self.nodes[u]['name']
-            to_name = self.nodes[v]['name']
+                if action_type in ['L', 'R']:
+                    arduino_code = TURN_CMD_MAP.get((action_type, int(val)))
+                    all_steps.append({
+                        'type': 'TURN',
+                        'action': f"Turn {val}° {'LEFT' if action_type == 'L' else 'RIGHT'}",
+                        'arduino_cmd': arduino_code,
+                        'leg': key
+                    })
+                elif action_type == 'F':
+                    drive_secs = float(val) * self.base_drive_time
+                    all_steps.append({
+                        'type': 'DRIVE',
+                        'action': f"Drive Forward ({val} units / {drive_secs:.1f}s)",
+                        'arduino_cmd': 'W',
+                        'duration': drive_secs,
+                        'leg': key
+                    })
+                elif action_type == 'B':
+                    drive_secs = float(val) * self.base_drive_time
+                    all_steps.append({
+                        'type': 'DRIVE',
+                        'action': f"Drive Backward ({val} units / {drive_secs:.1f}s)",
+                        'arduino_cmd': 'S',
+                        'duration': drive_secs,
+                        'leg': key
+                    })
 
-            step_data = {
-                'step_num': i + 1,
-                'from_node': u,
-                'from_name': from_name,
-                'to_node': v,
-                'to_name': to_name,
-                'turn_action': turn_action,
-                'turn_cmd': turn_cmd,
-                'drive_cmd': drive_cmd,
-                'drive_duration': edge['duration'],
-                'distance_meters': edge['distance'],
-                'target_heading': new_heading
-            }
-            steps.append(step_data)
-            current_heading = new_heading
-
-        return steps
+        return all_steps
 
 if __name__ == '__main__':
     nav = CampusNavigator('routes.json')
-    path, dist = nav.dijkstra("S", "A")
-    print(f"Path S->A: {path}")
-    steps = nav.generate_turn_by_turn(path, initial_heading=270)
+    p, d = nav.dijkstra('S', 'A')
+    print(f"Path S->A: {p} (dist: {d})")
+    steps = nav.get_motion_commands_for_path(p)
     for s in steps:
-        print(f"  {s['turn_action']} -> DriveCmd: {s['drive_cmd']} -> {s['to_name']}")
+        print(f"  -> {s['action']} (Cmd: {s['arduino_cmd']})")
 
-    path_ret, _ = nav.dijkstra("A", "S")
-    print(f"\nReturn Path A->S: {path_ret}")
-    steps_ret = nav.generate_turn_by_turn(path_ret, initial_heading=270)
-    for s in steps_ret:
-        print(f"  {s['turn_action']} -> DriveCmd: {s['drive_cmd']} -> {s['to_name']}")
+    p2, d2 = nav.dijkstra('A', 'S')
+    print(f"\nPath A->S: {p2} (dist: {d2})")
+    steps2 = nav.get_motion_commands_for_path(p2)
+    for s in steps2:
+        print(f"  -> {s['action']} (Cmd: {s['arduino_cmd']})")
