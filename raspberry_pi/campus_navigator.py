@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Campus Connect - Dijkstra Shortest Path Navigation Engine
-Calculates optimal route and translates path into robot motion commands.
+Supports direct forward and reverse/backward motion without unnecessary 180° turns.
 """
 
 import json
@@ -30,7 +30,7 @@ class CampusNavigator:
             v = edge['to']
             dist = edge['distance_meters']
             heading = edge.get('heading_degrees', 0)
-            duration = edge.get('drive_time_seconds', 4.0)
+            duration = edge.get('drive_time_seconds', 3.0)
 
             if u in self.graph:
                 self.graph[u][v] = dist
@@ -66,7 +66,6 @@ class CampusNavigator:
                     previous[neighbor] = curr_node
                     heapq.heappush(pq, (distance, neighbor))
 
-        # Reconstruct path
         path = []
         curr = target_id
         while curr:
@@ -81,12 +80,7 @@ class CampusNavigator:
     def generate_turn_by_turn(self, path, initial_heading=0):
         """
         Translates node path into robot motion actions.
-        Commands:
-          - 'STRAIGHT' (Drive forward)
-          - 'TURN_90_LEFT' (Arduino '1')
-          - 'TURN_90_RIGHT' (Arduino '2')
-          - 'TURN_180_LEFT' (Arduino '3')
-          - 'TURN_180_RIGHT' (Arduino '4')
+        When moving backwards on a return path (180° difference), it moves BACKWARD directly without turning!
         """
         if not path or len(path) < 2:
             return []
@@ -97,30 +91,38 @@ class CampusNavigator:
         for i in range(len(path) - 1):
             u = path[i]
             v = path[i + 1]
-            edge = self.edges_info.get((u, v), {'heading': 0, 'distance': 10, 'duration': 4.0})
+            edge = self.edges_info.get((u, v), {'heading': 0, 'distance': 5, 'duration': 3.0})
             target_heading = edge['heading']
 
-            # Calculate shortest relative turn angle (-180 to +180)
+            # Shortest relative turn angle (-180 to +180)
             angle_diff = (target_heading - current_heading + 180) % 360 - 180
 
             turn_action = None
-            arduino_cmd = None
+            turn_cmd = None
+            drive_cmd = 'W' # Default: Forward
+            new_heading = target_heading
 
             if abs(angle_diff) < 30:
                 turn_action = "CONTINUE STRAIGHT"
-                arduino_cmd = None
+                turn_cmd = None
+                drive_cmd = 'W'
+                new_heading = target_heading
             elif 60 <= angle_diff <= 120:
-                # Right Turn (Clockwise +90°)
                 turn_action = "TURN 90° RIGHT"
-                arduino_cmd = '2'
+                turn_cmd = '2'
+                drive_cmd = 'W'
+                new_heading = target_heading
             elif -120 <= angle_diff <= -60:
-                # Left Turn (Counter-Clockwise -90°)
                 turn_action = "TURN 90° LEFT"
-                arduino_cmd = '1'
+                turn_cmd = '1'
+                drive_cmd = 'W'
+                new_heading = target_heading
             elif abs(angle_diff) >= 150:
-                # U-Turn 180°
-                turn_action = "TURN 180° (U-TURN)"
-                arduino_cmd = '3'
+                # Opposite return path -> Reverse directly without 180° rotation!
+                turn_action = "REVERSE / BACKWARD (No 180° Turn)"
+                turn_cmd = None
+                drive_cmd = 'S' # Drive Backward
+                new_heading = current_heading # Heading stays same since bot didn't rotate
 
             from_name = self.nodes[u]['name']
             to_name = self.nodes[v]['name']
@@ -132,20 +134,27 @@ class CampusNavigator:
                 'to_node': v,
                 'to_name': to_name,
                 'turn_action': turn_action,
-                'turn_cmd': arduino_cmd,
+                'turn_cmd': turn_cmd,
+                'drive_cmd': drive_cmd,
                 'drive_duration': edge['duration'],
                 'distance_meters': edge['distance'],
-                'target_heading': target_heading
+                'target_heading': new_heading
             }
             steps.append(step_data)
-            current_heading = target_heading
+            current_heading = new_heading
 
         return steps
 
 if __name__ == '__main__':
     nav = CampusNavigator('routes.json')
-    path, dist = nav.dijkstra("MAIN_GATE", "TECH_LABS")
-    print(f"Shortest Path: {' -> '.join(path)} (Distance: {dist}m)")
-    steps = nav.generate_turn_by_turn(path, initial_heading=0)
+    path, dist = nav.dijkstra("S", "A")
+    print(f"Path S->A: {path}")
+    steps = nav.generate_turn_by_turn(path, initial_heading=270)
     for s in steps:
-        print(f"Step {s['step_num']}: {s['turn_action']} -> Drive to {s['to_name']} ({s['distance_meters']}m)")
+        print(f"  {s['turn_action']} -> DriveCmd: {s['drive_cmd']} -> {s['to_name']}")
+
+    path_ret, _ = nav.dijkstra("A", "S")
+    print(f"\nReturn Path A->S: {path_ret}")
+    steps_ret = nav.generate_turn_by_turn(path_ret, initial_heading=270)
+    for s in steps_ret:
+        print(f"  {s['turn_action']} -> DriveCmd: {s['drive_cmd']} -> {s['to_name']}")

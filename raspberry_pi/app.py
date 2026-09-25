@@ -2,6 +2,7 @@
 """
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
 Supports SVG Diamond Map, Voice Commands, Dijkstra Pathfinding, and Live Telemetry.
+Includes direct Reverse / Backward movement on return paths without 180° turns.
 """
 
 import os
@@ -19,7 +20,7 @@ app = Flask(__name__)
 
 # State
 current_location = "S"
-current_robot_heading = 0  # 0=North, 90=East, 180=South, 270=West
+current_robot_heading = 270  # Default facing West (towards A) or 0
 robot_status = "System Ready (Idle)"
 current_yaw = 0.0
 is_navigating = False
@@ -86,9 +87,8 @@ def execute_navigation(destination):
         return
 
     robot_status = f"Navigating: {' ➔ '.join(path)}"
-    print(f"[NAV] Path: {' -> '.join(path)} ({dist}m) | Starting Facing Heading: {current_robot_heading}°")
+    print(f"[NAV] Path: {' -> '.join(path)} ({dist}m) | Starting Heading: {current_robot_heading}°")
 
-    # Generate turn-by-turn based on where the robot is ACTUALLY facing
     steps = nav_engine.generate_turn_by_turn(path, initial_heading=current_robot_heading)
 
     for step in steps:
@@ -98,20 +98,23 @@ def execute_navigation(destination):
         to_node = step['to_node']
         turn_cmd = step.get('turn_cmd')
         turn_action = step.get('turn_action', 'STRAIGHT')
+        drive_cmd = step.get('drive_cmd', 'W')
         target_heading = step.get('target_heading', current_robot_heading)
 
-        # 1. Turn to face destination
+        # 1. Turn only if turn_cmd is specified (e.g. 90° Left or 90° Right)
         if turn_cmd:
             robot_status = f"{turn_action}..."
             send_cmd(turn_cmd)
             time.sleep(2.0)
 
-        # Update current heading after turn
         current_robot_heading = target_heading
 
-        # 2. Drive Forward
-        robot_status = f"Moving to Node {to_node}..."
-        send_cmd('W')
+        # 2. Drive (Forward 'W' or Backward 'S')
+        action_name = "Reversing back" if drive_cmd == 'S' else "Moving forward"
+        robot_status = f"{action_name} to Node {to_node}..."
+        print(f"[NAV] Step: {turn_action} -> Send '{drive_cmd}' to Node {to_node}")
+        
+        send_cmd(drive_cmd)
         drive_time = step.get('drive_duration', 3.0)
         
         start_t = time.time()
@@ -171,7 +174,6 @@ def handle_voice():
     transcript = (data.get('text') or '').upper()
     print(f"[VOICE] Heard: {transcript}")
 
-    # Detect destination letter A, B, C, D, S or Base/Home
     target = None
     if "BASE" in transcript or "HOME" in transcript or "STATION" in transcript or " POINT S" in transcript or " TO S" in transcript:
         target = "S"
@@ -184,7 +186,6 @@ def handle_voice():
     elif "POINT D" in transcript or " TO D" in transcript or transcript.endswith(" D"):
         target = "D"
     else:
-        # Check regex single letter
         match = re.search(r'\b([A-D]|S)\b', transcript)
         if match:
             target = match.group(1)
@@ -194,7 +195,7 @@ def handle_voice():
             return jsonify({"success": False, "message": "Robot currently busy navigating."})
         is_navigating = True
         threading.Thread(target=execute_navigation, args=(target,), daemon=True).start()
-        return jsonify({"success": True, "message": f"Voice command recognized: Navigating to Point {target}"})
+        return jsonify({"success": True, "message": f"Voice recognized: Navigating to Point {target}"})
 
     return jsonify({"success": False, "message": f"Could not extract destination from '{transcript}'"})
 
