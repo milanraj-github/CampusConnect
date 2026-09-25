@@ -207,6 +207,7 @@
           <span id="micText">Voice Command (Robot Mic)</span>
         </button>
         <div class="voice-transcript" id="voiceStatus">Tap mic and speak e.g. "Navigate to Point A"</div>
+        <a href="/qrcodes" target="_blank" style="display: block; text-align: center; margin-top: 6px; padding: 8px 12px; background: rgba(88, 166, 255, 0.1); border: 1px solid var(--accent-blue); border-radius: 8px; color: var(--accent-blue); font-weight: 600; text-decoration: none; font-size: 0.9rem;">📱 View / Print 5 Node QR Codes</a>
       </div>
     </div>
 
@@ -427,7 +428,11 @@
         statusText.textContent = text;
         banner.className = "status-banner";
 
-        if (text.toLowerCase().includes("obstacle")) {
+        if (text.includes("Verified")) {
+          banner.style.borderColor = "var(--accent-green)";
+          banner.style.backgroundColor = "rgba(46, 160, 67, 0.15)";
+          banner.style.color = "var(--accent-green)";
+        } else if (text.toLowerCase().includes("obstacle")) {
           banner.classList.add("obstacle");
         } else if (text.toLowerCase().includes("moving") || text.toLowerCase().includes("turning") || text.toLowerCase().includes("routing")) {
           banner.classList.add("moving");

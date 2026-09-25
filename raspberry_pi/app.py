@@ -3,6 +3,7 @@
 Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
 Features:
 - Bulletproof Live MJPEG Camera Video Streaming with Auto-Cleanup
+- Integrated Destination QR Code Scanner & Verification ("Destination verified successfully!")
 - 15.0cm Ultrasonic Safety Zone & Dynamic Dijkstra Obstacle Rerouting
 - Crystal-Clear Multi-Engine Speaker Voice Output (Bluetooth / Audio)
 - USB Microphone Speech Recognition
@@ -21,6 +22,17 @@ import serial
 
 from campus_navigator import CampusNavigator
 
+# OpenCV for live camera QR Code detection
+try:
+    import cv2
+    import numpy as np
+    qr_detector = cv2.QRCodeDetector()
+    HAS_QR_DETECTOR = True
+    print("[INFO] OpenCV QR Code Detector initialized successfully.")
+except Exception as e:
+    HAS_QR_DETECTOR = False
+    print(f"[WARN] OpenCV QR Detector not available: {e}")
+
 app = Flask(__name__)
 
 # System State
@@ -33,66 +45,13 @@ is_navigating = False
 arduino_serial = None
 nav_engine = None
 
+# QR Code State
+target_qr_destination = None
+qr_verified = False
+last_scanned_qr = ""
+last_scanned_time = 0
+
 last_voice_alert_time = 0
-
-# --- ROCK-SOLID LIVE CAMERA STREAM GENERATOR ---
-def generate_video_frames():
-    """Streams live MJPEG camera video. Cleans up processes to prevent camera hardware locks."""
-    # Kill any dangling camera processes first
-    os.system("pkill -9 -f rpicam-vid >/dev/null 2>&1")
-    os.system("pkill -9 -f libcamera-vid >/dev/null 2>&1")
-    time.sleep(0.15)
-
-    cam_cmd = "rpicam-vid"
-    if subprocess.call(["which", "rpicam-vid"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
-        if subprocess.call(["which", "libcamera-vid"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
-            cam_cmd = "libcamera-vid"
-
-    cmd = [
-        cam_cmd,
-        "-t", "0",
-        "--inline",
-        "--width", "640",
-        "--height", "480",
-        "--codec", "mjpeg",
-        "--framerate", "25",
-        "--nopreview",
-        "-o", "-"
-    ]
-
-    process = None
-    try:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=65536)
-        buffer = b''
-        while True:
-            chunk = process.stdout.read(4096)
-            if not chunk:
-                break
-            buffer += chunk
-            a = buffer.find(b'\xff\xd8') # JPEG Start
-            if a != -1:
-                b = buffer.find(b'\xff\xd9', a + 2) # JPEG End
-                if b != -1:
-                    jpg_frame = buffer[a:b+2]
-                    buffer = buffer[b+2:]
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + jpg_frame + b'\r\n')
-            if len(buffer) > 250000:
-                buffer = b''
-    except GeneratorExit:
-        pass
-    except Exception as err:
-        print(f"[CAMERA STREAM NOTICE] {err}")
-    finally:
-        if process:
-            try:
-                process.terminate()
-                process.wait(timeout=0.4)
-            except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
 
 # --- HIGH-QUALITY SPEAKER VOICE OUTPUT ---
 def speak_alert(text):
@@ -133,6 +92,128 @@ def speak_alert(text):
             pass
 
     threading.Thread(target=_play_speech, daemon=True).start()
+
+# --- LIVE CAMERA FRAME QR PROCESSING ---
+def process_frame_for_qr(jpg_frame):
+    """Detects QR codes in video stream, draws bounding box, and verifies destination."""
+    global target_qr_destination, qr_verified, last_scanned_qr, last_scanned_time, robot_status
+
+    if not HAS_QR_DETECTOR:
+        return jpg_frame
+
+    try:
+        np_arr = np.frombuffer(jpg_frame, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return jpg_frame
+
+        data, bbox, _ = qr_detector.detectAndDecode(img)
+        if data:
+            data_clean = data.strip().upper()
+            now = time.time()
+
+            if (data_clean != last_scanned_qr) or (now - last_scanned_time > 3.0):
+                last_scanned_qr = data_clean
+                last_scanned_time = now
+                print(f"[QR SCANNER] 📷 Detected QR Code: '{data_clean}'")
+
+                # Match destination if actively verifying
+                if target_qr_destination:
+                    target = target_qr_destination.upper()
+                    match = False
+                    if target == "S" and any(k in data_clean for k in ["S", "BASE", "HOME", "NODE_S"]):
+                        match = True
+                    elif target in data_clean or f"NODE_{target}" in data_clean or f"POINT_{target}" in data_clean:
+                        match = True
+
+                    if match and not qr_verified:
+                        qr_verified = True
+                        dest_name = "Base Station" if target == "S" else f"Point {target}"
+                        print(f"[QR SUCCESS] ✅ {dest_name} matched QR: '{data_clean}'!")
+                        speak_alert("Destination verified successfully!")
+                        robot_status = f"✅ {dest_name} Verified Successfully (QR: {data_clean})"
+
+            # Draw visual highlight on live camera stream
+            if bbox is not None and len(bbox) > 0:
+                pts = bbox[0].astype(int)
+                n = len(pts)
+                for i in range(n):
+                    cv2.line(img, tuple(pts[i]), tuple(pts[(i + 1) % n]), (0, 255, 0), 3)
+                cv2.putText(img, f"QR: {data_clean}", (int(pts[0][0]), int(pts[0][1]) - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                _, enc = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                return enc.tobytes()
+
+    except Exception:
+        pass
+
+    return jpg_frame
+
+# --- ROCK-SOLID LIVE CAMERA STREAM GENERATOR ---
+def generate_video_frames():
+    """Streams live MJPEG camera video with QR detection and auto process cleanup."""
+    # Kill any dangling camera processes first
+    os.system("pkill -9 -f rpicam-vid >/dev/null 2>&1")
+    os.system("pkill -9 -f libcamera-vid >/dev/null 2>&1")
+    time.sleep(0.15)
+
+    cam_cmd = "rpicam-vid"
+    if subprocess.call(["which", "rpicam-vid"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+        if subprocess.call(["which", "libcamera-vid"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+            cam_cmd = "libcamera-vid"
+
+    cmd = [
+        cam_cmd,
+        "-t", "0",
+        "--inline",
+        "--width", "640",
+        "--height", "480",
+        "--codec", "mjpeg",
+        "--framerate", "25",
+        "--nopreview",
+        "-o", "-"
+    ]
+
+    process = None
+    try:
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=65536)
+        buffer = b''
+        frame_counter = 0
+        while True:
+            chunk = process.stdout.read(4096)
+            if not chunk:
+                break
+            buffer += chunk
+            a = buffer.find(b'\xff\xd8') # JPEG Start
+            if a != -1:
+                b = buffer.find(b'\xff\xd9', a + 2) # JPEG End
+                if b != -1:
+                    jpg_frame = buffer[a:b+2]
+                    buffer = buffer[b+2:]
+                    frame_counter += 1
+
+                    # Run QR detection
+                    if HAS_QR_DETECTOR and (target_qr_destination or frame_counter % 2 == 0):
+                        jpg_frame = process_frame_for_qr(jpg_frame)
+
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpg_frame + b'\r\n')
+            if len(buffer) > 250000:
+                buffer = b''
+    except GeneratorExit:
+        pass
+    except Exception as err:
+        print(f"[CAMERA STREAM NOTICE] {err}")
+    finally:
+        if process:
+            try:
+                process.terminate()
+                process.wait(timeout=0.4)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
 
 def find_arduino():
     ports = glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')
@@ -184,11 +265,11 @@ def send_cmd(cmd_str):
         except Exception as e:
             print(f"[ERROR] Serial write error: {e}")
 
-# Autonomous Navigation Worker with 15cm Obstacle Avoidance & Voice Announcements
+# Autonomous Navigation Worker with 15cm Obstacle Avoidance & QR Destination Verification
 def execute_navigation(destination):
-    global current_location, robot_status, is_navigating, obstacle_detected
+    global current_location, robot_status, is_navigating, obstacle_detected, target_qr_destination, qr_verified
 
-    dest_name = "Base Station" if destination == "S" else f"Destination {destination}"
+    dest_name = "Base Station" if destination == "S" else f"Point {destination}"
     speak_alert(f"Starting navigation to {dest_name}.")
 
     if current_location == destination:
@@ -274,9 +355,30 @@ def execute_navigation(destination):
             break
 
     send_cmd('X')
+
     if current_location == destination:
-        robot_status = f"Arrived at {dest_name} (Idle)"
-        speak_alert(f"Successfully arrived at {dest_name}.")
+        dest_name = "Base Station" if destination == "S" else f"Point {destination}"
+        robot_status = f"Arrived at {dest_name}. Scanning QR Code..."
+        speak_alert(f"Arrived at {dest_name}. Scanning QR code.")
+
+        # Active QR Code Scan Window (up to 8 seconds)
+        target_qr_destination = destination
+        qr_verified = False
+        scan_start = time.time()
+
+        while time.time() - scan_start < 8.0:
+            if qr_verified:
+                break
+            time.sleep(0.1)
+
+        if qr_verified:
+            robot_status = f"✅ {dest_name} Verified Successfully (Idle)"
+        else:
+            robot_status = f"Arrived at {dest_name} (Idle)"
+            speak_alert(f"Arrived at {dest_name}.")
+
+        target_qr_destination = None
+
     is_navigating = False
     print(f"[NAV] Trip Complete! Current Location: {current_location}\n")
 
@@ -285,6 +387,10 @@ def execute_navigation(destination):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/qrcodes')
+def qrcodes():
+    return render_template('qrcodes.html')
 
 @app.route('/video_feed')
 def video_feed():
@@ -349,7 +455,7 @@ def handle_current():
 def handle_status():
     if obstacle_detected:
         return jsonify({"status": f"⚠️ Obstacle Detected at {current_distance:.1f}cm!"})
-    return jsonify({"status": robot_status})
+    return jsonify({"status": robot_status, "last_qr": last_scanned_qr, "qr_verified": qr_verified})
 
 @app.route('/imu')
 def handle_imu():
@@ -433,5 +539,6 @@ if __name__ == '__main__':
     print("\n" + "=" * 60)
     print(" 🤖 CAMPUS CONNECT ROBOT SERVER ACTIVE")
     print(" Open in Browser: http://<RaspberryPi_IP>:5000")
+    print(" Destination QR Codes: http://<RaspberryPi_IP>:5000/qrcodes")
     print("=" * 60 + "\n")
     app.run(host='0.0.0.0', port=5000, debug=False)

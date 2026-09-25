@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Campus Connect - Destination QR Codes</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --accent: #58a6ff;
+      --green: #2ea043;
+      --text: #f0f6fc;
+      --text-muted: #8b949e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 30px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .header {
+      text-align: center;
+      max-width: 700px;
+      margin-bottom: 25px;
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 8px; color: var(--text); }
+    p { color: var(--text-muted); font-size: 0.95rem; }
+    .print-btn {
+      margin-top: 15px;
+      padding: 10px 20px;
+      background: var(--accent);
+      color: #0d1117;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .print-btn:hover { opacity: 0.9; }
+    .qr-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+      width: 100%;
+      max-width: 900px;
+    }
+    .qr-card {
+      background: white;
+      color: #111;
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      border: 3px solid #e1e4e8;
+    }
+    .qr-title {
+      font-size: 1.3rem;
+      font-weight: 800;
+      margin-bottom: 4px;
+      color: #0366d6;
+    }
+    .qr-sub {
+      font-size: 0.85rem;
+      color: #586069;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+    .qr-img {
+      width: 180px;
+      height: 180px;
+      margin-bottom: 12px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+    }
+    .qr-val {
+      font-family: monospace;
+      font-size: 0.9rem;
+      font-weight: 700;
+      background: #f1f8ff;
+      color: #0366d6;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid #c8e1ff;
+    }
+    @media print {
+      body { background: white; color: black; padding: 0; }
+      .header, .print-btn { display: none; }
+      .qr-grid { grid-template-columns: repeat(2, 1fr); gap: 15px; }
+      .qr-card { break-inside: avoid; border: 2px solid #333; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>📱 5 Node Destination QR Codes</h1>
+    <p>Place these QR codes at their respective node locations (or show to the robot's camera) for automatic destination verification.</p>
+    <button class="print-btn" onclick="window.print()">🖨️ Print All 5 QR Codes</button>
+  </div>
+
+  <div class="qr-grid">
+    <!-- Node S -->
+    <div class="qr-card">
+      <div class="qr-title">🏠 Base Station (Node S)</div>
+      <div class="qr-sub">Starting & Home Position</div>
+      <img class="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=NODE_S" alt="QR Node S" />
+      <div class="qr-val">Data: NODE_S</div>
+    </div>
+
+    <!-- Node A -->
+    <div class="qr-card">
+      <div class="qr-title">📍 Destination Point A</div>
+      <div class="qr-sub">Zone A Station</div>
+      <img class="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=NODE_A" alt="QR Node A" />
+      <div class="qr-val">Data: NODE_A</div>
+    </div>
+
+    <!-- Node B -->
+    <div class="qr-card">
+      <div class="qr-title">📍 Destination Point B</div>
+      <div class="qr-sub">Zone B Station</div>
+      <img class="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=NODE_B" alt="QR Node B" />
+      <div class="qr-val">Data: NODE_B</div>
+    </div>
+
+    <!-- Node C -->
+    <div class="qr-card">
+      <div class="qr-title">📍 Destination Point C</div>
+      <div class="qr-sub">Zone C Station</div>
+      <img class="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=NODE_C" alt="QR Node C" />
+      <div class="qr-val">Data: NODE_C</div>
+    </div>
+
+    <!-- Node D -->
+    <div class="qr-card">
+      <div class="qr-title">📍 Destination Point D</div>
+      <div class="qr-sub">Zone D Station</div>
+      <img class="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=NODE_D" alt="QR Node D" />
+      <div class="qr-val">Data: NODE_D</div>
+    </div>
+  </div>
+
+</body>
+</html>
