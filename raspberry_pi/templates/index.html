@@ -1,280 +1,582 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>CampusConnect Rover</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autonomous IMU Robot Navigation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0f172a;
-      --card: #1e293b;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --accent: #10b981;
-      --danger: #ef4444;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --accent-blue: #58a6ff;
+      --accent-green: #2ea043;
+      --accent-orange: #f0883e;
+      --accent-purple: #bc8cff;
+      --text-main: #c9d1d9;
+      --text-bold: #f0f6fc;
+      --text-muted: #8b949e;
+      --danger: #f85149;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg); color: var(--text); padding: 12px; padding-bottom: 30px; }
-    
-    header { text-align: center; margin-bottom: 16px; }
-    h1 { font-size: 1.5rem; color: var(--primary); }
-    p.sub { font-size: 0.85rem; color: var(--text-muted); }
 
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 900px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      padding: 12px 0;
+    }
+
+    header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--text-bold);
+      margin-bottom: 6px;
+    }
+
+    header p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    /* Grid Layout */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Cards */
     .card {
-      background: var(--card);
-      border-radius: 16px;
-      padding: 16px;
-      margin-bottom: 16px;
-      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
-    }
-    .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-
-    /* Telemetry Dashboard */
-    .telemetry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .tele-box {
-      background: rgba(15, 23, 42, 0.6);
-      padding: 12px;
+      background-color: var(--card-bg);
+      border: 1px solid var(--card-border);
       border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+
+    .card h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--text-bold);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Status Grid */
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .stat-box {
+      background-color: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px;
       text-align: center;
     }
-    .tele-val { font-size: 1.4rem; font-weight: bold; color: var(--accent); }
-    .tele-label { font-size: 0.75rem; color: var(--text-muted); }
 
-    /* Navigation Form */
-    select {
-      width: 100%;
-      padding: 12px;
-      background: #0f172a;
-      border: 1px solid #334155;
-      color: white;
-      border-radius: 10px;
-      font-size: 0.95rem;
-      margin-bottom: 10px;
+    .stat-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
     }
-    .btn {
-      width: 100%;
-      padding: 12px;
+
+    .stat-value {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+    }
+
+    .stat-value.highlight {
+      color: var(--accent-green);
+    }
+
+    .status-banner {
+      background-color: rgba(88, 166, 255, 0.1);
+      border: 1px solid var(--accent-blue);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-weight: 500;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-bold);
+    }
+
+    .status-banner.obstacle {
+      background-color: rgba(248, 81, 73, 0.15);
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    .status-banner.moving {
+      background-color: rgba(240, 136, 62, 0.15);
+      border-color: var(--accent-orange);
+      color: var(--accent-orange);
+    }
+
+    .pulsing-dot {
+      width: 10px;
+      height: 10px;
+      background-color: var(--accent-green);
+      border-radius: 50%;
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    /* Destination Buttons */
+    .dest-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .btn-dest {
+      background-color: #21262d;
+      border: 1px solid var(--card-border);
+      color: var(--text-bold);
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-dest:hover {
+      background-color: #30363d;
+      border-color: var(--accent-blue);
+      transform: translateY(-2px);
+    }
+
+    .btn-dest:active {
+      transform: translateY(0);
+    }
+
+    .btn-dest.home {
+      grid-column: span 2;
+      background-color: rgba(88, 166, 255, 0.1);
+      border-color: var(--accent-blue);
+    }
+
+    .btn-dest.home:hover {
+      background-color: rgba(88, 166, 255, 0.2);
+    }
+
+    /* Voice Control Section */
+    .voice-box {
+      border-top: 1px solid var(--card-border);
+      padding-top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .btn-mic {
+      background: linear-gradient(135deg, #1f6feb, #238636);
       border: none;
-      border-radius: 10px;
+      color: white;
+      border-radius: 8px;
+      padding: 12px 16px;
       font-size: 1rem;
       font-weight: 600;
       cursor: pointer;
       display: flex;
+      align-items: center;
       justify-content: center;
-      align-items: center;
       gap: 8px;
-      transition: 0.2s;
+      transition: all 0.2s ease;
     }
-    .btn-primary { background: var(--primary); color: white; }
-    .btn-accent { background: var(--accent); color: white; margin-top: 10px; }
-    .btn-danger { background: var(--danger); color: white; margin-top: 10px; }
-    .btn:active { transform: scale(0.98); opacity: 0.9; }
 
-    /* Steps List */
-    .steps-container { margin-top: 14px; max-height: 220px; overflow-y: auto; }
-    .step-item {
-      background: #0f172a;
-      padding: 10px;
+    .btn-mic:hover {
+      opacity: 0.9;
+      transform: scale(1.02);
+    }
+
+    .btn-mic.listening {
+      background: var(--danger);
+      animation: micPulse 1s infinite alternate;
+    }
+
+    @keyframes micPulse {
+      from { box-shadow: 0 0 5px rgba(248, 81, 73, 0.5); }
+      to { box-shadow: 0 0 20px rgba(248, 81, 73, 0.9); }
+    }
+
+    .voice-transcript {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      min-height: 20px;
+      text-align: center;
+    }
+
+    /* Visual Map */
+    .map-container {
+      position: relative;
+      width: 100%;
+      height: 280px;
+      background: #090d13;
       border-radius: 8px;
-      margin-bottom: 6px;
-      font-size: 0.85rem;
-      border-left: 4px solid var(--primary);
-    }
-
-    /* Manual D-Pad */
-    .dpad-container {
+      border: 1px solid var(--card-border);
       display: flex;
-      flex-direction: column;
       align-items: center;
-      gap: 10px;
-      margin-top: 10px;
+      justify-content: center;
     }
-    .dpad-row { display: flex; gap: 10px; justify-content: center; width: 100%; }
-    .dpad-btn {
-      width: 75px;
-      height: 65px;
-      background: #334155;
-      border: none;
-      border-radius: 12px;
-      color: white;
-      font-size: 1.3rem;
-      font-weight: bold;
-      touch-action: manipulation;
-    }
-    .dpad-btn:active { background: var(--primary); }
-    .dpad-stop { background: var(--danger); width: 100%; max-width: 250px; }
 
-    /* 90 deg turn buttons */
-    .turn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-    .turn-btn {
-      padding: 10px;
-      background: #1e293b;
-      border: 1px solid #475569;
-      color: #93c5fd;
-      border-radius: 10px;
-      font-size: 0.85rem;
+    svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .node {
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .node circle {
+      fill: #21262d;
+      stroke: var(--card-border);
+      stroke-width: 2;
+      transition: all 0.3s;
+    }
+
+    .node text {
+      fill: var(--text-bold);
       font-weight: 600;
+      font-size: 14px;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    .node:hover circle {
+      stroke: var(--accent-blue);
+      stroke-width: 3;
+    }
+
+    .node.active circle {
+      fill: var(--accent-green);
+      stroke: #ffffff;
+      stroke-width: 3;
+      filter: drop-shadow(0 0 8px rgba(46, 160, 67, 0.6));
+    }
+
+    .path-line {
+      stroke: #30363d;
+      stroke-width: 2;
+      stroke-dasharray: 4;
+    }
+
+    /* Logs */
+    .log-box {
+      background: #090d13;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px;
+      height: 120px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .log-entry {
+      margin-bottom: 4px;
     }
   </style>
 </head>
 <body>
 
+<div class="container">
+  <!-- Header -->
   <header>
-    <h1>🗺️ CampusConnect Rover</h1>
-    <p class="sub">Autonomous Navigation & Mobile Control</p>
+    <h1>🤖 Autonomous IMU Robot Navigation</h1>
+    <p>Precision Angular Navigation with Closed-Loop Gyroscope Feedback</p>
   </header>
 
-  <!-- Live Status -->
-  <div class="card">
-    <div class="card-title">📡 Live Status & Heading</div>
-    <div class="telemetry-grid">
-      <div class="tele-box">
-        <div id="tele-yaw" class="tele-val">0.0°</div>
-        <div class="tele-label">Heading (Yaw)</div>
-      </div>
-      <div class="tele-box">
-        <div id="tele-state" class="tele-val" style="font-size: 1.1rem;">STOPPED</div>
-        <div class="tele-label">Motion State</div>
-      </div>
-    </div>
-    <div id="nav-status-banner" style="margin-top: 8px; font-size: 0.8rem; color: #38bdf8; text-align: center;">Status: Ready</div>
-  </div>
-
-  <!-- Route Planner (Dijkstra) -->
-  <div class="card">
-    <div class="card-title">📍 Dijkstra Route Planner</div>
+  <!-- Main Grid -->
+  <div class="grid">
     
-    <label style="font-size: 0.8rem; color: var(--text-muted);">Current Location:</label>
-    <select id="start-node">
-      {% for node in nodes %}
-        <option value="{{ node.id }}">{{ node.name }}</option>
-      {% endfor %}
-    </select>
+    <!-- Controls Card -->
+    <div class="card">
+      <h2>🎯 Navigate to Destination</h2>
+      <div class="dest-grid">
+        <button class="btn-dest" onclick="sendNavigation('A')">📍 Point A</button>
+        <button class="btn-dest" onclick="sendNavigation('B')">📍 Point B</button>
+        <button class="btn-dest" onclick="sendNavigation('C')">📍 Point C</button>
+        <button class="btn-dest" onclick="sendNavigation('D')">📍 Point D</button>
+        <button class="btn-dest home" onclick="sendNavigation('S')">🏠 Base Station (S)</button>
+      </div>
 
-    <label style="font-size: 0.8rem; color: var(--text-muted);">Destination:</label>
-    <select id="end-node">
-      {% for node in nodes %}
-        <option value="{{ node.id }}" {% if loop.index == 2 %}selected{% endif %}>{{ node.name }}</option>
-      {% endfor %}
-    </select>
+      <!-- Voice Command -->
+      <div class="voice-box">
+        <button class="btn-mic" id="micBtn" onclick="toggleVoiceRecognition()">
+          <span id="micIcon">🎙️</span>
+          <span id="micText">Voice Command</span>
+        </button>
+        <div class="voice-transcript" id="voiceStatus">Press mic and say e.g. "Navigate to A"</div>
+      </div>
+    </div>
 
-    <button class="btn btn-primary" onclick="planRoute()">🔍 Calculate Shortest Path</button>
-
-    <div id="route-result" style="display: none;">
-      <div id="route-summary" style="margin-top: 10px; font-weight: bold; font-size: 0.9rem; color: var(--accent);"></div>
-      <div id="steps-list" class="steps-container"></div>
+    <!-- Live Telemetry & Map -->
+    <div class="card">
+      <h2>📊 Live Telemetry</h2>
       
-      <button id="start-nav-btn" class="btn btn-accent" onclick="startNavigation()">🚀 Start Auto-Navigation</button>
-      <button id="stop-nav-btn" class="btn btn-danger" onclick="stopNavigation()" style="display:none;">🛑 Halt Navigation</button>
+      <div class="telemetry-grid">
+        <div class="stat-box">
+          <div class="stat-label">Current Node</div>
+          <div class="stat-value highlight" id="locDisplay">S</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">IMU Yaw Heading</div>
+          <div class="stat-value" id="yawDisplay">0.0°</div>
+        </div>
+      </div>
+
+      <div class="status-banner" id="statusBanner">
+        <div class="pulsing-dot" id="statusDot"></div>
+        <span id="statusText">System Ready (Idle)</span>
+      </div>
+
+      <h2 style="margin-top: 16px; margin-bottom: 8px;">🗺️ Route Map</h2>
+      <div class="map-container">
+        <svg viewBox="0 0 300 240">
+          <!-- Diamond Edges -->
+          <line x1="50" y1="120" x2="150" y2="30" class="path-line" />
+          <line x1="150" y1="30" x2="250" y2="120" class="path-line" />
+          <line x1="250" y1="120" x2="150" y2="210" class="path-line" />
+          <line x1="150" y1="210" x2="50" y2="120" class="path-line" />
+          
+          <!-- Cross Edges from Center S -->
+          <line x1="150" y1="120" x2="50" y2="120" class="path-line" />
+          <line x1="150" y1="120" x2="150" y2="30" class="path-line" />
+          <line x1="150" y1="120" x2="250" y2="120" class="path-line" />
+          <line x1="150" y1="120" x2="150" y2="210" class="path-line" />
+
+          <!-- Nodes: S(Center), B(North), D(East), C(South), A(West) -->
+          <g class="node active" id="node-S" onclick="sendNavigation('S')">
+            <circle cx="150" cy="120" r="18" />
+            <text x="150" y="120">S</text>
+          </g>
+          <g class="node" id="node-B" onclick="sendNavigation('B')">
+            <circle cx="150" cy="30" r="16" />
+            <text x="150" y="30">B</text>
+          </g>
+          <g class="node" id="node-A" onclick="sendNavigation('A')">
+            <circle cx="50" cy="120" r="16" />
+            <text x="50" y="120">A</text>
+          </g>
+          <g class="node" id="node-D" onclick="sendNavigation('D')">
+            <circle cx="250" cy="120" r="16" />
+            <text x="250" y="120">D</text>
+          </g>
+          <g class="node" id="node-C" onclick="sendNavigation('C')">
+            <circle cx="150" cy="210" r="16" />
+            <text x="150" y="210">C</text>
+          </g>
+        </svg>
+      </div>
     </div>
+
   </div>
 
-  <!-- Manual Touch D-Pad -->
+  <!-- Realtime Activity Log -->
   <div class="card">
-    <div class="card-title">🎮 Mobile Touch Controls</div>
-    <div class="dpad-container">
-      <div class="dpad-row">
-        <button class="dpad-btn" onclick="sendCmd('W')">▲</button>
-      </div>
-      <div class="dpad-row">
-        <button class="dpad-btn" onclick="sendCmd('A')">◀</button>
-        <button class="dpad-btn" onclick="sendCmd('X')" style="background: #dc2626;">⏹</button>
-        <button class="dpad-btn" onclick="sendCmd('D')">▶</button>
-      </div>
-      <div class="dpad-row">
-        <button class="dpad-btn" onclick="sendCmd('S')">▼</button>
-      </div>
-    </div>
-
-    <!-- Precision Auto-turns -->
-    <div class="turn-grid">
-      <button class="turn-btn" onclick="sendCmd('1')">↰ 90° Left</button>
-      <button class="turn-btn" onclick="sendCmd('2')">↱ 90° Right</button>
-      <button class="turn-btn" onclick="sendCmd('3')">⮌ 180° U-Turn</button>
-      <button class="turn-btn" onclick="sendCmd('Z')">🎯 Zero Heading</button>
+    <h2>📜 Navigation Activity Log</h2>
+    <div class="log-box" id="logBox">
+      <div class="log-entry">[System] Web UI connected. Waiting for commands.</div>
     </div>
   </div>
+</div>
 
-  <script>
-    let plannedSteps = [];
+<script>
+  let currentLocation = "S";
+  let isNavigating = false;
 
-    // Poll Telemetry
-    setInterval(async () => {
+  function addLog(msg) {
+    const box = document.getElementById("logBox");
+    const entry = document.createElement("div");
+    entry.className = "log-entry";
+    const time = new Date().toLocaleTimeString();
+    entry.textContent = `[${time}] ${msg}`;
+    box.appendChild(entry);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function updateActiveNode(node) {
+    document.querySelectorAll(".node").forEach(el => el.classList.remove("active"));
+    const activeEl = document.getElementById(`node-${node}`);
+    if (activeEl) {
+      activeEl.classList.add("active");
+    }
+  }
+
+  async function sendNavigation(destination) {
+    addLog(`Sending destination: ${destination}`);
+    isNavigating = true;
+
+    try {
+      const response = await fetch("/navigate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destination: destination })
+      });
+      const data = await response.json();
+      addLog(`Result: ${data.message || JSON.stringify(data)}`);
+    } catch (err) {
+      addLog(`Error during navigation: ${err}`);
+    } finally {
+      isNavigating = false;
+    }
+  }
+
+  // Periodic Telemetry Polling (every 500ms)
+  async function pollStatus() {
+    try {
+      // 1. Current Location
+      const locRes = await fetch("/current");
+      if (locRes.ok) {
+        const locData = await locRes.json();
+        if (locData.location) {
+          currentLocation = locData.location;
+          document.getElementById("locDisplay").textContent = currentLocation;
+          updateActiveNode(currentLocation);
+        }
+      }
+
+      // 2. Robot Status
+      const statusRes = await fetch("/robot_status");
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        const text = statusData.status || "Idle";
+        const banner = document.getElementById("statusBanner");
+        const statusText = document.getElementById("statusText");
+
+        statusText.textContent = text;
+        banner.className = "status-banner";
+
+        if (text.toLowerCase().includes("obstacle")) {
+          banner.classList.add("obstacle");
+        } else if (text.toLowerCase().includes("moving") || text.toLowerCase().includes("turning")) {
+          banner.classList.add("moving");
+        }
+      }
+
+      // 3. IMU Yaw Heading
+      const imuRes = await fetch("/imu");
+      if (imuRes.ok) {
+        const imuData = await imuRes.json();
+        if (imuData.yaw !== undefined) {
+          document.getElementById("yawDisplay").textContent = `${Number(imuData.yaw).toFixed(1)}°`;
+        }
+      }
+    } catch (e) {
+      // Offline / disconnected
+    }
+  }
+
+  setInterval(pollStatus, 500);
+
+  // Web Speech API Voice Recognition
+  let recognition = null;
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      document.getElementById("micBtn").classList.add("listening");
+      document.getElementById("voiceStatus").textContent = "Listening... Speak now.";
+    };
+
+    recognition.onresult = async (event) => {
+      const transcript = event.results[0][0].transcript;
+      document.getElementById("voiceStatus").textContent = `Heard: "${transcript}"`;
+      addLog(`Voice Recognized: "${transcript}"`);
+
       try {
-        const res = await fetch('/api/telemetry');
-        const data = await res.json();
-        document.getElementById('tele-yaw').innerText = (data.yaw >= 0 ? '+' : '') + data.yaw.toFixed(1) + '°';
-        document.getElementById('tele-state').innerText = data.state;
-        document.getElementById('nav-status-banner').innerText = 'Status: ' + (data.nav_status || 'Ready');
-      } catch (e) {}
-    }, 250);
-
-    // Plan Route via Dijkstra API
-    async function planRoute() {
-      const start = document.getElementById('start-node').value;
-      const destination = document.getElementById('end-node').value;
-
-      if (start === destination) {
-        alert("Start and destination cannot be the same!");
-        return;
+        const res = await fetch("/voice", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: transcript })
+        });
+        const result = await res.json();
+        addLog(`Voice command executed: ${result.message || JSON.stringify(result)}`);
+      } catch (err) {
+        addLog(`Voice request failed: ${err}`);
       }
+    };
 
-      const res = await fetch('/api/plan_route', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start, destination })
-      });
+    recognition.onerror = (event) => {
+      document.getElementById("voiceStatus").textContent = `Voice Error: ${event.error}`;
+      document.getElementById("micBtn").classList.remove("listening");
+    };
 
-      const data = await res.json();
-      if (!data.success) {
-        alert(data.message);
-        return;
-      }
+    recognition.onend = () => {
+      document.getElementById("micBtn").classList.remove("listening");
+    };
+  }
 
-      plannedSteps = data.steps;
-      document.getElementById('route-result').style.display = 'block';
-      document.getElementById('route-summary').innerText = `Path: ${data.path_names.join(' ➔ ')} (${data.total_distance}m total)`;
-
-      const stepsContainer = document.getElementById('steps-list');
-      stepsContainer.innerHTML = '';
-      data.steps.forEach(s => {
-        const div = document.createElement('div');
-        div.className = 'step-item';
-        div.innerHTML = `<strong>Step ${s.step_num}:</strong> ${s.turn_action} ➔ Drive to <em>${s.to_name}</em> (${s.distance_meters}m)`;
-        stepsContainer.appendChild(div);
-      });
+  function toggleVoiceRecognition() {
+    if (!recognition) {
+      alert("Speech recognition is not supported in this browser. Please use Google Chrome or Edge.");
+      return;
     }
+    recognition.start();
+  }
+</script>
 
-    // Start Auto-Nav
-    async function startNavigation() {
-      if (plannedSteps.length === 0) return;
-      document.getElementById('start-nav-btn').style.display = 'none';
-      document.getElementById('stop-nav-btn').style.display = 'block';
-
-      await fetch('/api/start_nav', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ steps: plannedSteps })
-      });
-    }
-
-    // Stop Auto-Nav
-    async function stopNavigation() {
-      await fetch('/api/stop_nav', { method: 'POST' });
-      document.getElementById('start-nav-btn').style.display = 'block';
-      document.getElementById('stop-nav-btn').style.display = 'none';
-    }
-
-    // Manual Command
-    async function sendCmd(cmd) {
-      await fetch('/api/manual_control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cmd })
-      });
-    }
-  </script>
 </body>
 </html>

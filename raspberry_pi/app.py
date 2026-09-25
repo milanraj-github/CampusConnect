@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Campus Connect - Mobile Web Application Server (Flask)
-Hosts the mobile-friendly web interface on port 5000.
-Connect from your phone browser at: http://<RaspberryPi_IP>:5000
+Campus Connect - Autonomous IMU Robot Navigation Server (Flask)
+Supports SVG Diamond Map, Voice Commands, Dijkstra Pathfinding, and Live Telemetry.
 """
 
 import os
 import sys
 import time
 import glob
-import json
+import re
 import threading
 from flask import Flask, render_template, request, jsonify
 import serial
@@ -18,17 +17,13 @@ from campus_navigator import CampusNavigator
 
 app = Flask(__name__)
 
-# Global state
-arduino_serial = None
-current_telemetry = {
-    "yaw": 0.0,
-    "speed": 200,
-    "state": "STOPPED",
-    "nav_status": "IDLE"
-}
-nav_engine = None
+# State
+current_location = "S"
+robot_status = "System Ready (Idle)"
+current_yaw = 0.0
 is_navigating = False
-nav_thread = None
+arduino_serial = None
+nav_engine = None
 
 def find_arduino():
     ports = glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')
@@ -43,152 +38,166 @@ def init_serial():
             time.sleep(2)
             arduino_serial.reset_input_buffer()
             print(f"[INFO] Connected to Arduino on {port}")
-            # Start telemetry reader thread
-            t = threading.Thread(target=serial_reader_loop, daemon=True)
-            t.start()
+            threading.Thread(target=serial_telemetry_loop, daemon=True).start()
         except Exception as e:
-            print(f"[WARN] Could not open serial: {e}")
+            print(f"[WARN] Serial connect failed: {e}")
     else:
-        print("[WARN] Arduino not connected. Web interface running in simulation mode.")
+        print("[WARN] Arduino not detected. Running in simulated mode.")
 
-def send_command(cmd_char):
-    global arduino_serial
-    if arduino_serial and arduino_serial.is_open:
-        try:
-            arduino_serial.write(cmd_char.encode('utf-8'))
-            arduino_serial.flush()
-        except Exception as e:
-            print(f"[ERROR] Serial write error: {e}")
-
-def serial_reader_loop():
-    global arduino_serial, current_telemetry
+def serial_telemetry_loop():
+    global arduino_serial, current_yaw
     while True:
         if arduino_serial and arduino_serial.is_open:
             try:
                 if arduino_serial.in_waiting > 0:
                     line = arduino_serial.readline().decode('utf-8', errors='ignore').strip()
                     if line.startswith("YAW:"):
-                        # Parse format: YAW:+45.2|SPEED:200|STATE:STOPPED
                         parts = line.split('|')
                         for p in parts:
                             if p.startswith("YAW:"):
-                                current_telemetry["yaw"] = float(p.replace("YAW:", ""))
-                            elif p.startswith("SPEED:"):
-                                current_telemetry["speed"] = int(p.replace("SPEED:", ""))
-                            elif p.startswith("STATE:"):
-                                current_telemetry["state"] = p.replace("STATE:", "")
+                                current_yaw = float(p.replace("YAW:", ""))
             except Exception:
                 pass
         time.sleep(0.05)
 
-# Autonomous Navigation Runner
-def run_autonomous_route(steps):
-    global is_navigating, current_telemetry
-    is_navigating = True
-    current_telemetry["nav_status"] = "NAVIGATING"
+def send_cmd(cmd_str):
+    global arduino_serial
+    if arduino_serial and arduino_serial.is_open:
+        try:
+            arduino_serial.write(cmd_str.encode('utf-8'))
+            arduino_serial.flush()
+        except Exception as e:
+            print(f"[ERROR] Serial write error: {e}")
 
-    for idx, step in enumerate(steps):
+# Autonomous Navigation Worker
+def execute_navigation(destination):
+    global current_location, robot_status, is_navigating
+
+    if current_location == destination:
+        robot_status = f"Already at Point {destination}"
+        is_navigating = False
+        return
+
+    path, dist = nav_engine.dijkstra(current_location, destination)
+    if not path or len(path) < 2:
+        robot_status = f"No path found to {destination}"
+        is_navigating = False
+        return
+
+    robot_status = f"Navigating: {' ➔ '.join(path)}"
+    print(f"[NAV] Path: {' -> '.join(path)} ({dist}m)")
+
+    steps = nav_engine.generate_turn_by_turn(path, initial_heading=0)
+
+    for step in steps:
         if not is_navigating:
             break
 
-        current_telemetry["nav_status"] = f"Step {idx+1}/{len(steps)}: {step['turn_action']} -> {step['to_name']}"
-        print(f"[NAV] {current_telemetry['nav_status']}")
-
-        # 1. Execute Turn if needed
+        to_node = step['to_node']
         turn_cmd = step.get('turn_cmd')
+        turn_action = step.get('turn_action', 'STRAIGHT')
+
+        # 1. Turn
         if turn_cmd:
-            send_command(turn_cmd)
-            time.sleep(1.8) # Wait for auto-turn completion
+            robot_status = f"{turn_action}..."
+            send_cmd(turn_cmd)
+            time.sleep(1.8)
 
         # 2. Drive Forward
-        send_command('W')
-        drive_time = step.get('drive_duration', 3.5)
+        robot_status = f"Moving to Node {to_node}..."
+        send_cmd('W')
+        drive_time = step.get('drive_duration', 3.0)
         
-        # Check for interrupt during driving
         start_t = time.time()
         while time.time() - start_t < drive_time:
             if not is_navigating:
                 break
             time.sleep(0.1)
 
-        # 3. Stop at node
-        send_command('X')
+        # 3. Arrive & Stop at node
+        send_cmd('X')
+        current_location = to_node
         time.sleep(0.8)
 
-    send_command('X')
+    send_cmd('X')
+    robot_status = f"Arrived at Point {destination} (Idle)"
     is_navigating = False
-    current_telemetry["nav_status"] = "ARRIVED AT DESTINATION" if is_navigating is False else "IDLE"
-    print("[NAV] Autonomous Navigation Completed.")
+    print(f"[NAV] Navigation finished at {current_location}")
+
+# --- API Endpoints ---
 
 @app.route('/')
 def index():
-    nodes = list(nav_engine.nodes.values()) if nav_engine else []
-    return render_template('index.html', nodes=nodes, campus_name=nav_engine.campus_name if nav_engine else "CampusConnect")
+    return render_template('index.html')
 
-@app.route('/api/telemetry')
-def api_telemetry():
-    return jsonify(current_telemetry)
-
-@app.route('/api/plan_route', methods=['POST'])
-def api_plan_route():
+@app.route('/navigate', methods=['POST'])
+def handle_navigate():
+    global is_navigating, robot_status
     data = request.json or {}
-    start_id = data.get('start')
-    end_id = data.get('destination')
+    dest = (data.get('destination') or '').upper()
 
-    path, distance = nav_engine.dijkstra(start_id, end_id)
-    if not path:
-        return jsonify({"success": False, "message": "No path found between locations"}), 404
-
-    steps = nav_engine.generate_turn_by_turn(path, initial_heading=0)
-    return jsonify({
-        "success": True,
-        "path": path,
-        "path_names": [nav_engine.nodes[p]['name'] for p in path],
-        "total_distance": distance,
-        "steps": steps
-    })
-
-@app.route('/api/start_nav', methods=['POST'])
-def api_start_nav():
-    global nav_thread, is_navigating
-    data = request.json or {}
-    steps = data.get('steps', [])
-
-    if not steps:
-        return jsonify({"success": False, "message": "No steps provided"}), 400
+    if dest not in nav_engine.nodes:
+        return jsonify({"success": False, "message": f"Invalid destination '{dest}'"}), 400
 
     if is_navigating:
-        return jsonify({"success": False, "message": "Already navigating"}), 400
+        return jsonify({"success": False, "message": "Robot is already navigating!"}), 400
 
-    nav_thread = threading.Thread(target=run_autonomous_route, args=(steps,), daemon=True)
-    nav_thread.start()
-    return jsonify({"success": True, "message": "Navigation started"})
+    is_navigating = True
+    threading.Thread(target=execute_navigation, args=(dest,), daemon=True).start()
+    return jsonify({"success": True, "message": f"Routing from {current_location} to {dest}..."})
 
-@app.route('/api/stop_nav', methods=['POST'])
-def api_stop_nav():
+@app.route('/current')
+def handle_current():
+    return jsonify({"location": current_location})
+
+@app.route('/robot_status')
+def handle_status():
+    return jsonify({"status": robot_status})
+
+@app.route('/imu')
+def handle_imu():
+    return jsonify({"yaw": current_yaw})
+
+@app.route('/voice', methods=['POST'])
+def handle_voice():
     global is_navigating
-    is_navigating = False
-    send_command('X')
-    current_telemetry["nav_status"] = "STOPPED"
-    return jsonify({"success": True, "message": "Navigation halted"})
-
-@app.route('/api/manual_control', methods=['POST'])
-def api_manual_control():
-    global is_navigating
-    is_navigating = False # Manual override
     data = request.json or {}
-    cmd = data.get('cmd')
-    if cmd:
-        send_command(cmd)
-        return jsonify({"success": True, "cmd": cmd})
-    return jsonify({"success": False, "message": "No command"}), 400
+    transcript = (data.get('text') or '').upper()
+    print(f"[VOICE] Heard: {transcript}")
+
+    # Detect destination letter A, B, C, D, S or Base/Home
+    target = None
+    if "BASE" in transcript or "HOME" in transcript or "STATION" in transcript or " POINT S" in transcript or " TO S" in transcript:
+        target = "S"
+    elif "POINT A" in transcript or " TO A" in transcript or transcript.endswith(" A"):
+        target = "A"
+    elif "POINT B" in transcript or " TO B" in transcript or transcript.endswith(" B"):
+        target = "B"
+    elif "POINT C" in transcript or " TO C" in transcript or transcript.endswith(" C"):
+        target = "C"
+    elif "POINT D" in transcript or " TO D" in transcript or transcript.endswith(" D"):
+        target = "D"
+    else:
+        # Check regex single letter
+        match = re.search(r'\b([A-D]|S)\b', transcript)
+        if match:
+            target = match.group(1)
+
+    if target:
+        if is_navigating:
+            return jsonify({"success": False, "message": "Robot currently busy navigating."})
+        is_navigating = True
+        threading.Thread(target=execute_navigation, args=(target,), daemon=True).start()
+        return jsonify({"success": True, "message": f"Voice command recognized: Navigating to Point {target}"})
+
+    return jsonify({"success": False, "message": f"Could not extract destination from '{transcript}'"})
 
 if __name__ == '__main__':
-    routes_path = os.path.join(os.path.dirname(__file__), 'routes.json')
-    nav_engine = CampusNavigator(routes_path)
+    routes_file = os.path.join(os.path.dirname(__file__), 'routes.json')
+    nav_engine = CampusNavigator(routes_file)
     init_serial()
     print("\n" + "=" * 60)
-    print(" 📱 CAMPUS CONNECT MOBILE WEB SERVER RUNNING")
-    print(" Open from your Phone or PC at: http://<RaspberryPi_IP>:5000")
+    print(" 🤖 CAMPUS CONNECT AUTONOMOUS ROBOT SERVER ACTIVE")
+    print(" Open in Browser: http://<RaspberryPi_IP>:5000")
     print("=" * 60 + "\n")
     app.run(host='0.0.0.0', port=5000, debug=False)

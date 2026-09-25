@@ -1,168 +1,28 @@
 {
-  "campus_name": "CampusConnect Smart Rover",
+  "campus_name": "Autonomous IMU Robot Navigation",
   "nodes": [
-    {
-      "id": "MAIN_GATE",
-      "name": "Main Entrance Gate",
-      "x": 0,
-      "y": 0,
-      "description": "Campus Main Security Gate"
-    },
-    {
-      "id": "ADMIN_BLOCK",
-      "name": "Admin Building",
-      "x": 0,
-      "y": 10,
-      "description": "Administrative Offices & Reception"
-    },
-    {
-      "id": "CENTRAL_LIBRARY",
-      "name": "Central Library",
-      "x": -10,
-      "y": 10,
-      "description": "Library and Study Halls"
-    },
-    {
-      "id": "CANTEEN",
-      "name": "Food Court & Canteen",
-      "x": 10,
-      "y": 10,
-      "description": "Student Cafeteria"
-    },
-    {
-      "id": "TECH_LABS",
-      "name": "Robotics & Tech Labs",
-      "x": -10,
-      "y": 20,
-      "description": "Computer Science & Robotics Labs"
-    },
-    {
-      "id": "AUDITORIUM",
-      "name": "Grand Auditorium",
-      "x": 10,
-      "y": 20,
-      "description": "Events and Seminar Hall"
-    },
-    {
-      "id": "INNOVATION_HUB",
-      "name": "Innovation Center",
-      "x": 0,
-      "y": 20,
-      "description": "Startups & Project Workspace"
-    }
+    { "id": "S", "name": "Base Station (S)", "x": 0, "y": 0 },
+    { "id": "B", "name": "Point B (North)", "x": 0, "y": 10 },
+    { "id": "D", "name": "Point D (East)", "x": 10, "y": 0 },
+    { "id": "C", "name": "Point C (South)", "x": 0, "y": -10 },
+    { "id": "A", "name": "Point A (West)", "x": -10, "y": 0 }
   ],
   "edges": [
-    {
-      "from": "MAIN_GATE",
-      "to": "ADMIN_BLOCK",
-      "distance_meters": 10,
-      "heading_degrees": 0,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "ADMIN_BLOCK",
-      "to": "MAIN_GATE",
-      "distance_meters": 10,
-      "heading_degrees": 180,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "ADMIN_BLOCK",
-      "to": "CENTRAL_LIBRARY",
-      "distance_meters": 10,
-      "heading_degrees": 270,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "CENTRAL_LIBRARY",
-      "to": "ADMIN_BLOCK",
-      "distance_meters": 10,
-      "heading_degrees": 90,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "ADMIN_BLOCK",
-      "to": "CANTEEN",
-      "distance_meters": 10,
-      "heading_degrees": 90,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "CANTEEN",
-      "to": "ADMIN_BLOCK",
-      "distance_meters": 10,
-      "heading_degrees": 270,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "CENTRAL_LIBRARY",
-      "to": "TECH_LABS",
-      "distance_meters": 10,
-      "heading_degrees": 0,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "TECH_LABS",
-      "to": "CENTRAL_LIBRARY",
-      "distance_meters": 10,
-      "heading_degrees": 180,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "CANTEEN",
-      "to": "AUDITORIUM",
-      "distance_meters": 10,
-      "heading_degrees": 0,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "AUDITORIUM",
-      "to": "CANTEEN",
-      "distance_meters": 10,
-      "heading_degrees": 180,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "TECH_LABS",
-      "to": "INNOVATION_HUB",
-      "distance_meters": 10,
-      "heading_degrees": 90,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "INNOVATION_HUB",
-      "to": "TECH_LABS",
-      "distance_meters": 10,
-      "heading_degrees": 270,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "AUDITORIUM",
-      "to": "INNOVATION_HUB",
-      "distance_meters": 10,
-      "heading_degrees": 270,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "INNOVATION_HUB",
-      "to": "AUDITORIUM",
-      "distance_meters": 10,
-      "heading_degrees": 90,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "ADMIN_BLOCK",
-      "to": "INNOVATION_HUB",
-      "distance_meters": 10,
-      "heading_degrees": 0,
-      "drive_time_seconds": 4.0
-    },
-    {
-      "from": "INNOVATION_HUB",
-      "to": "ADMIN_BLOCK",
-      "distance_meters": 10,
-      "heading_degrees": 180,
-      "drive_time_seconds": 4.0
-    }
+    { "from": "S", "to": "B", "distance_meters": 5, "heading_degrees": 0, "drive_time_seconds": 3.0 },
+    { "from": "B", "to": "S", "distance_meters": 5, "heading_degrees": 180, "drive_time_seconds": 3.0 },
+    { "from": "S", "to": "D", "distance_meters": 5, "heading_degrees": 90, "drive_time_seconds": 3.0 },
+    { "from": "D", "to": "S", "distance_meters": 5, "heading_degrees": 270, "drive_time_seconds": 3.0 },
+    { "from": "S", "to": "C", "distance_meters": 5, "heading_degrees": 180, "drive_time_seconds": 3.0 },
+    { "from": "C", "to": "S", "distance_meters": 5, "heading_degrees": 0, "drive_time_seconds": 3.0 },
+    { "from": "S", "to": "A", "distance_meters": 5, "heading_degrees": 270, "drive_time_seconds": 3.0 },
+    { "from": "A", "to": "S", "distance_meters": 5, "heading_degrees": 90, "drive_time_seconds": 3.0 },
+    { "from": "A", "to": "B", "distance_meters": 7, "heading_degrees": 45, "drive_time_seconds": 3.5 },
+    { "from": "B", "to": "A", "distance_meters": 7, "heading_degrees": 225, "drive_time_seconds": 3.5 },
+    { "from": "B", "to": "D", "distance_meters": 7, "heading_degrees": 135, "drive_time_seconds": 3.5 },
+    { "from": "D", "to": "B", "distance_meters": 7, "heading_degrees": 315, "drive_time_seconds": 3.5 },
+    { "from": "D", "to": "C", "distance_meters": 7, "heading_degrees": 225, "drive_time_seconds": 3.5 },
+    { "from": "C", "to": "D", "distance_meters": 7, "heading_degrees": 45, "drive_time_seconds": 3.5 },
+    { "from": "C", "to": "A", "distance_meters": 7, "heading_degrees": 315, "drive_time_seconds": 3.5 },
+    { "from": "A", "to": "C", "distance_meters": 7, "heading_degrees": 135, "drive_time_seconds": 3.5 }
   ]
 }
