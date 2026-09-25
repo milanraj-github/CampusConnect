@@ -303,10 +303,10 @@ def handle_listen_usb_mic():
     except Exception:
         pass
 
-    # 2. Record in clean 16kHz Mono format (ideal for Speech Recognition)
+    # 2. Record 4 seconds in clean 16kHz Mono format (allows full natural sentence)
     try:
-        cmd = ["arecord", "-D", "plughw:3,0", "-d", "3", "-f", "S16_LE", "-r", "16000", "-c", "1", audio_file]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        cmd = ["arecord", "-D", "plughw:3,0", "-d", "4", "-f", "S16_LE", "-r", "16000", "-c", "1", audio_file]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=6)
     except Exception as e:
         return jsonify({"success": False, "message": f"Mic recording error: {e}"})
 
@@ -316,7 +316,7 @@ def handle_listen_usb_mic():
     try:
         import speech_recognition as sr
         r = sr.Recognizer()
-        r.energy_threshold = 300
+        r.energy_threshold = 200
         r.dynamic_energy_threshold = True
 
         with sr.AudioFile(audio_file) as source:
@@ -324,34 +324,39 @@ def handle_listen_usb_mic():
             try:
                 recognized_text = r.recognize_google(audio_data)
             except sr.UnknownValueError:
-                rec_error = "Could not understand audio. Please speak louder/closer to mic."
+                rec_error = "Could not understand audio. Please speak clearly into the mic."
             except sr.RequestError as req_err:
-                rec_error = f"Internet connection needed for speech recognition: {req_err}"
-    except ImportError:
-        rec_error = "SpeechRecognition library not installed. Run: pip3 install SpeechRecognition --break-system-packages"
+                rec_error = f"Speech API error: {req_err}"
     except Exception as e:
         rec_error = f"Speech error: {e}"
 
     if not recognized_text:
         print(f"[SPEECH FAIL] {rec_error}")
-        return jsonify({"success": False, "message": rec_error or "No speech detected. Speak louder into the mic."})
+        return jsonify({"success": False, "message": rec_error or "No speech detected. Speak clearly."})
 
     print(f"[USB MIC SPEECH] Recognized: '{recognized_text}'")
-    transcript = recognized_text.upper()
+    transcript = recognized_text.upper().strip()
 
-    # Route extraction
+    # Smart resilient destination extraction
     target = None
-    if "BASE" in transcript or "HOME" in transcript or "STATION" in transcript or " POINT S" in transcript or " TO S" in transcript or transcript == "S":
+
+    # Base Station / S keywords
+    if any(k in transcript for k in ["BASE", "HOME", "STATION", "START", "CENTER", "POINT S", "TO S", "NODE S"]) or transcript == "S":
         target = "S"
-    elif "POINT A" in transcript or " TO A" in transcript or " A" in transcript or transcript == "A":
+    # Point A keywords (including phonetics like "part a", "apple", "alpha")
+    elif any(k in transcript for k in ["POINT A", "TO A", "NODE A", "PART A", "ALPHA", "FIRST", "LETTER A"]) or transcript.endswith(" A") or " A " in transcript or transcript == "A":
         target = "A"
-    elif "POINT B" in transcript or " TO B" in transcript or " B" in transcript or transcript == "B":
+    # Point B keywords (including "bee", "be", "bravo", "boy")
+    elif any(k in transcript for k in ["POINT B", "TO B", "NODE B", "PART B", "BRAVO", "BEE", "SECOND", "LETTER B"]) or transcript.endswith(" B") or " B " in transcript or transcript == "B":
         target = "B"
-    elif "POINT C" in transcript or " TO C" in transcript or " C" in transcript or transcript == "C":
+    # Point C keywords (including "see", "sea", "charlie")
+    elif any(k in transcript for k in ["POINT C", "TO C", "NODE C", "PART C", "CHARLIE", "SEE", "SEA", "THIRD", "LETTER C"]) or transcript.endswith(" C") or " C " in transcript or transcript == "C":
         target = "C"
-    elif "POINT D" in transcript or " TO D" in transcript or " D" in transcript or transcript == "D":
+    # Point D keywords (including "dee", "delta", "dog")
+    elif any(k in transcript for k in ["POINT D", "TO D", "NODE D", "PART D", "DELTA", "DEE", "FOURTH", "LETTER D"]) or transcript.endswith(" D") or " D " in transcript or transcript == "D":
         target = "D"
     else:
+        # Regex fallback for single letters
         match = re.search(r'\b([A-D]|S)\b', transcript)
         if match:
             target = match.group(1)
@@ -359,9 +364,9 @@ def handle_listen_usb_mic():
     if target:
         is_navigating = True
         threading.Thread(target=execute_navigation, args=(target,), daemon=True).start()
-        return jsonify({"success": True, "text": recognized_text, "message": f"Heard '{recognized_text}' ➔ Navigating to {target}"})
+        return jsonify({"success": True, "text": recognized_text, "message": f"Heard '{recognized_text}' ➔ Navigating to Point {target}"})
 
-    return jsonify({"success": False, "text": recognized_text, "message": f"Heard '{recognized_text}', but could not find destination letter (A, B, C, D, S)."})
+    return jsonify({"success": False, "text": recognized_text, "message": f"Heard '{recognized_text}'. Say e.g. 'Navigate to A', 'Point B', or 'Base Station'."})
 
 if __name__ == '__main__':
     routes_file = os.path.join(os.path.dirname(__file__), 'routes.json')
